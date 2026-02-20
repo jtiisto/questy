@@ -37,6 +37,27 @@ _RENDER_DPI = 150
 _MODEL = "claude-haiku-4-5-20251001"
 
 
+# Known font/glyph mapping errors in PDF text extraction.
+# PDF fonts sometimes render glyphs differently than their Unicode mapping,
+# causing OCR/text-extraction to produce wrong characters.
+_UNIT_CORRECTIONS = {
+    "IL": "fL",  # femtoliters — PDF glyph for "f" misread as "I"
+}
+
+
+def _post_process_results(results: list[ParsedResult]) -> list[ParsedResult]:
+    """Apply deterministic post-processing corrections to extracted results."""
+    for r in results:
+        # Fix known unit glyph errors
+        if r.unit in _UNIT_CORRECTIONS:
+            old_unit = r.unit
+            new_unit = _UNIT_CORRECTIONS[old_unit]
+            r.unit = new_unit
+            if old_unit in r.ref_range_text:
+                r.ref_range_text = r.ref_range_text.replace(old_unit, new_unit)
+    return results
+
+
 def parse_pdf(
     pdf_path: Path | str,
     *,
@@ -132,6 +153,9 @@ def parse_pdf(
     # Pass 4: Verify extracted numeric values against raw text
     value_warnings = _verify_values(results, text_values)
     warnings.extend(value_warnings)
+
+    # Post-processing: fix known deterministic issues (unit glyphs, etc.)
+    results = _post_process_results(results)
 
     return ParsedReport(
         patient_name=header.get("patient_name", ""),

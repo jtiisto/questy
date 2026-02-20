@@ -107,7 +107,7 @@ All corrections emit warnings that are surfaced to the user via the CLI.
 
 ### Pass 2 — Result extraction (vision)
 
-Sends all pages in batches of 4 to Claude for structured extraction of test results and clinical notes. The collection date is provided in the prompt so the model can distinguish current results from historical trend charts that appear on the same pages. Panel context is carried across batches so tests at page boundaries are assigned to the correct panel.
+Sends all pages in batches of 4 to Claude for structured extraction of test results and clinical notes. The collection date is provided in the prompt so the model can distinguish current results from historical trend charts that appear on the same pages. Panel context is carried across batches so tests at page boundaries are assigned to the correct panel. The prompt explicitly instructs the model to skip educational conversion tables (e.g., A1c-to-eAG reference charts) and to recognize standalone test sections where the section heading is the panel name (e.g., FERRITIN, AST, ALT as their own panels rather than grouped under a preceding panel).
 
 ### Per-result validation
 
@@ -136,6 +136,12 @@ Recovery outcomes are tracked:
 ### Pass 4 — Value verification (pdftotext)
 
 Every extracted numeric value is compared against the pdftotext output for the same test name. On mismatch (beyond 0.01 tolerance), the value is auto-corrected to the text-extracted value. This catches the most common LLM error: reading a number from a historical trend chart instead of the current result line.
+
+### Post-processing
+
+After all extraction passes, deterministic corrections are applied to fix known issues that neither the LLM nor pdftotext can reliably handle:
+
+- **Unit glyph corrections** — Some PDF fonts render characters differently than their Unicode mapping. For example, "fL" (femtoliters) is commonly misread as "IL" by both vision and text extraction due to font glyph mapping. A corrections map (`_UNIT_CORRECTIONS`) fixes these, updating both the `unit` field and `ref_range_text`.
 
 ### Database upsert
 
@@ -198,7 +204,7 @@ pip install -e '.[dev]'
 pytest
 ```
 
-143 tests covering parser models, helper functions (build/validate/deduplicate/cross-check), database operations (import, upsert, date tracking), MCP config validation, query security (SQL injection prevention, read-only enforcement), MCP server integration, and CLI argument parsing.
+148 tests covering parser models, helper functions (build/validate/deduplicate/cross-check/post-process), database operations (import, upsert, date tracking), MCP config validation, query security (SQL injection prevention, read-only enforcement), MCP server integration, and CLI argument parsing.
 
 ## Project Structure
 

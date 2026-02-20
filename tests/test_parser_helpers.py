@@ -3,7 +3,7 @@
 These test the internal functions that don't require API calls or PDF files:
 _build_result, _build_note, _deduplicate_results, _parse_date,
 _parse_datetime, _parse_json_response, _find_missed_names, _verify_values,
-_validate_header.
+_validate_header, _post_process_results.
 """
 
 from __future__ import annotations
@@ -23,6 +23,7 @@ from questy.parser.pdf_parser import (
     _parse_date,
     _parse_datetime,
     _parse_json_response,
+    _post_process_results,
     _validate_header,
     _verify_values,
 )
@@ -565,3 +566,54 @@ class TestValidateHeader:
         # Can't compute age without collection date, no age/DOB warning
         assert header["age"] == 82
         assert len(warnings) == 0
+
+
+# --- _post_process_results ---
+
+
+class TestPostProcessResults:
+    def test_unit_correction_il_to_fl(self):
+        """MCV unit 'IL' (glyph error) should be corrected to 'fL'."""
+        r = ParsedResult(
+            "CBC (INCLUDES DIFF/PLT)", "MCV", 94.8, "94.8", None,
+            "IL", None, False, 80.0, 100.0, "80.0-100.0 IL",
+        )
+        results = _post_process_results([r])
+        assert results[0].unit == "fL"
+        assert results[0].ref_range_text == "80.0-100.0 fL"
+
+    def test_unit_correction_does_not_affect_other_units(self):
+        """Units not in the correction map should be left alone."""
+        r = ParsedResult(
+            "LIPID PANEL", "CHOLESTEROL", 229.0, "229", None,
+            "mg/dL", "H", False, None, 200.0, "<200",
+        )
+        results = _post_process_results([r])
+        assert results[0].unit == "mg/dL"
+
+    def test_ref_range_text_only_replaces_matching_unit(self):
+        """ref_range_text without the bad unit substring should not change."""
+        r = ParsedResult(
+            "CBC (INCLUDES DIFF/PLT)", "MCV", 94.8, "94.8", None,
+            "IL", None, False, 80.0, 100.0, "80.0-100.0",
+        )
+        results = _post_process_results([r])
+        assert results[0].unit == "fL"
+        assert results[0].ref_range_text == "80.0-100.0"
+
+    def test_empty_list(self):
+        assert _post_process_results([]) == []
+
+    def test_multiple_results_mixed(self):
+        """Only results with correctable units are modified."""
+        r1 = ParsedResult(
+            "CBC", "MCV", 94.8, "94.8", None,
+            "IL", None, False, 80.0, 100.0, "80.0-100.0 IL",
+        )
+        r2 = ParsedResult(
+            "CBC", "WBC", 6.5, "6.5", None,
+            "Thousand/uL", None, False, 3.8, 10.8, "3.8-10.8",
+        )
+        results = _post_process_results([r1, r2])
+        assert results[0].unit == "fL"
+        assert results[1].unit == "Thousand/uL"

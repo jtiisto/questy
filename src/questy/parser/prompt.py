@@ -71,6 +71,19 @@ value_text to "<0.5".
 value_text to "152 H".
 - Skip charts, graphs, trend visualizations, performing site addresses, \
 and "Report Insights" educational content.
+- Skip educational reference and conversion tables. For example, Hemoglobin \
+A1c reports often include an A1c-to-estimated Average Glucose (eAG) \
+conversion table showing multiple rows like "6% = 126 mg/dL, 7% = 154 \
+mg/dL, ...". Do NOT extract values from these tables — they are reference \
+material, not patient results. Only extract the patient's actual A1c \
+result and its corresponding eAG if shown as a distinct result line.
+- Some tests appear as standalone sections with their own heading rather \
+than under a broader panel. Examples: "FERRITIN", "AST", "ALT", \
+"CORTISOL, TOTAL". When a test has its own section heading and is NOT \
+listed within a broader panel section, use that section heading as \
+the panel_name. Only group tests under a parent panel (like \
+"COMPREHENSIVE METABOLIC PANEL" or "CBC (INCLUDES DIFF/PLT)") when \
+they clearly appear within that panel's results section in the report.
 - For reference ranges like "< or = 18.4", set ref_range_high to 18.4.
 - For reference ranges like "> OR = 60", set ref_range_low to 60.
 - For reference ranges like "30-100", set ref_range_low to 30, ref_range_high to 100.
