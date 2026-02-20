@@ -76,6 +76,11 @@ def parse_pdf(
 
     warnings: list[ParseWarning] = []
 
+    # Cross-check header fields (DOB, age) against raw text
+    text_header = _extract_header_from_text(pdf_path)
+    header_warnings = _validate_header(header, text_header)
+    warnings.extend(header_warnings)
+
     # Pass 2: Extract results from all pages in batches
     # Provide the collection date so the LLM can distinguish current results
     # from historical chart data that may appear on the same pages.
@@ -400,6 +405,115 @@ def _deduplicate_results(results: list[ParsedResult]) -> list[ParsedResult]:
     # Rebuild in original order, keeping only the last occurrence of each key
     indices = sorted(seen.values())
     return [results[i] for i in indices]
+
+
+# --- Text-based cross-check for header fields (DOB, age) ---
+
+# Regex patterns for Quest Diagnostics header fields in pdftotext output
+_DOB_RE = re.compile(r"DOB[:\s]+(\d{2}/\d{2}/\d{4})")
+_AGE_RE = re.compile(r"Age[:\s]+(\d+)", re.IGNORECASE)
+
+
+def _extract_header_from_text(pdf_path: Path) -> dict[str, str | None]:
+    """Extract DOB and age from raw PDF text via pdftotext.
+
+    Returns a dict with 'dob' (MM/DD/YYYY string) and 'age' (string).
+    These are deterministic text extractions, more reliable than LLM
+    vision for structured header fields.
+    """
+    result = subprocess.run(
+        ["pdftotext", "-f", "1", "-l", "1", "-layout", str(pdf_path), "-"],
+        capture_output=True,
+        text=True,
+    )
+    raw_text = result.stdout
+    if not raw_text:
+        return {"dob": None, "age": None}
+
+    dob_match = _DOB_RE.search(raw_text)
+    age_match = _AGE_RE.search(raw_text)
+
+    return {
+        "dob": dob_match.group(1) if dob_match else None,
+        "age": age_match.group(1) if age_match else None,
+    }
+
+
+def _validate_header(header: dict, text_header: dict) -> list[ParseWarning]:
+    """Cross-check LLM-extracted header against text extraction.
+
+    Validates DOB and age fields. If the text extraction found values
+    that differ from the LLM extraction, auto-corrects to the text
+    values (which are deterministic and more reliable for structured
+    fields). Also validates that age is consistent with DOB and
+    collection date.
+    """
+    warnings: list[ParseWarning] = []
+
+    # Cross-check DOB
+    text_dob_str = text_header.get("dob")
+    if text_dob_str:
+        text_dob = _parse_date(text_dob_str)
+        llm_dob = _parse_date(header.get("dob"))
+
+        if text_dob and llm_dob and text_dob != llm_dob:
+            warnings.append(ParseWarning(
+                level="warn",
+                message=(
+                    f"DOB corrected: LLM extracted {header.get('dob')}, "
+                    f"text extraction found {text_dob_str}. Using text value."
+                ),
+            ))
+            header["dob"] = text_dob.strftime("%Y-%m-%d")
+        elif text_dob and not llm_dob:
+            header["dob"] = text_dob.strftime("%Y-%m-%d")
+
+    # Cross-check age
+    text_age_str = text_header.get("age")
+    if text_age_str:
+        try:
+            text_age = int(text_age_str)
+        except ValueError:
+            text_age = None
+
+        llm_age = header.get("age")
+        if text_age is not None and llm_age is not None and text_age != llm_age:
+            warnings.append(ParseWarning(
+                level="warn",
+                message=(
+                    f"Age corrected: LLM extracted {llm_age}, "
+                    f"text extraction found {text_age}. Using text value."
+                ),
+            ))
+            header["age"] = text_age
+        elif text_age is not None and llm_age is None:
+            header["age"] = text_age
+
+    # Validate age against DOB + collection date
+    dob = _parse_date(header.get("dob"))
+    collected_at = _parse_datetime(header.get("collected_at"))
+    if dob and collected_at:
+        collection_date = collected_at.date()
+        computed_age = (
+            collection_date.year - dob.year
+            - ((collection_date.month, collection_date.day) < (dob.month, dob.day))
+        )
+        current_age = header.get("age")
+        if current_age is not None and abs(current_age - computed_age) > 1:
+            warnings.append(ParseWarning(
+                level="warn",
+                message=(
+                    f"Age/DOB inconsistency: extracted age {current_age}, "
+                    f"but DOB {header.get('dob')} with collection date "
+                    f"{collection_date} gives age {computed_age}. "
+                    f"Using computed age."
+                ),
+            ))
+            header["age"] = computed_age
+        elif current_age is None:
+            header["age"] = computed_age
+
+    return warnings
 
 
 # --- Text-based cross-check for missed results and value verification ---

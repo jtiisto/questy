@@ -2,7 +2,8 @@
 
 These test the internal functions that don't require API calls or PDF files:
 _build_result, _build_note, _deduplicate_results, _parse_date,
-_parse_datetime, _parse_json_response, _find_missed_names, _verify_values.
+_parse_datetime, _parse_json_response, _find_missed_names, _verify_values,
+_validate_header.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from questy.parser.pdf_parser import (
     _parse_date,
     _parse_datetime,
     _parse_json_response,
+    _validate_header,
     _verify_values,
 )
 
@@ -482,4 +484,84 @@ class TestVerifyValues:
         r = ParsedResult("LP", "CHOL", 229.005, "229", None, "mg/dL", None, False, None, None, "")
         text_values = {"CHOL": "229"}
         warnings = _verify_values([r], text_values)
+        assert len(warnings) == 0
+
+
+# --- _validate_header ---
+
+
+class TestValidateHeader:
+    def test_matching_header_no_warnings(self):
+        header = {"dob": "1990-01-15", "age": 35, "collected_at": "2025-04-11T07:30"}
+        text_header = {"dob": "01/15/1990", "age": "35"}
+        warnings = _validate_header(header, text_header)
+        assert len(warnings) == 0
+
+    def test_dob_corrected_from_text(self):
+        header = {"dob": "1947-04-17", "age": 77, "collected_at": "2025-04-18T09:50"}
+        text_header = {"dob": "03/08/1990", "age": "35"}
+        warnings = _validate_header(header, text_header)
+        assert header["dob"] == "1990-03-08"
+        assert any("DOB corrected" in w.message for w in warnings)
+
+    def test_age_corrected_from_text(self):
+        header = {"dob": "1990-03-08", "age": 82, "collected_at": "2025-11-14T07:50"}
+        text_header = {"dob": "03/08/1990", "age": "35"}
+        warnings = _validate_header(header, text_header)
+        assert header["age"] == 35
+        assert any("Age corrected" in w.message for w in warnings)
+
+    def test_age_computed_from_dob_and_collection_date(self):
+        """If extracted age is wildly off from DOB+collected_at, compute it."""
+        header = {"dob": "1990-03-08", "age": 82, "collected_at": "2025-11-14T07:50"}
+        text_header = {"dob": "03/08/1990", "age": "82"}  # Text also says 82 (wrong)
+        warnings = _validate_header(header, text_header)
+        # DOB 1990-03-08, collected 2025-11-14 → age 35
+        assert header["age"] == 35
+        assert any("Age/DOB inconsistency" in w.message for w in warnings)
+
+    def test_age_computed_when_dob_matches_but_age_wrong(self):
+        header = {"dob": "1990-06-20", "age": 50, "collected_at": "2025-04-11T07:30"}
+        text_header = {"dob": "06/20/1990", "age": "50"}
+        warnings = _validate_header(header, text_header)
+        # DOB 1990-06-20, collected 2025-04-11 → age 34
+        assert header["age"] == 34
+        assert any("inconsistency" in w.message.lower() for w in warnings)
+
+    def test_no_text_header_no_crash(self):
+        header = {"dob": "1990-01-15", "age": 35, "collected_at": "2025-04-11T07:30"}
+        text_header = {"dob": None, "age": None}
+        warnings = _validate_header(header, text_header)
+        # Only DOB+age consistency check runs, and 35 matches
+        assert len(warnings) == 0
+
+    def test_text_fills_missing_dob(self):
+        header = {"dob": None, "age": None, "collected_at": "2025-11-14T07:50"}
+        text_header = {"dob": "03/08/1990", "age": "35"}
+        warnings = _validate_header(header, text_header)
+        assert header["dob"] == "1990-03-08"
+        assert header["age"] == 35
+
+    def test_text_fills_missing_age(self):
+        header = {"dob": "1990-03-08", "age": None, "collected_at": "2025-11-14T07:50"}
+        text_header = {"dob": None, "age": "35"}
+        warnings = _validate_header(header, text_header)
+        assert header["age"] == 35
+
+    def test_age_tolerance_allows_off_by_one(self):
+        """Age can be off by 1 due to birthday timing — don't correct."""
+        header = {"dob": "1990-06-20", "age": 34, "collected_at": "2025-06-19T07:30"}
+        text_header = {"dob": "06/20/1990", "age": "34"}
+        warnings = _validate_header(header, text_header)
+        # DOB 1990-06-20, collected 2025-06-19 → computed age 34 (birthday tomorrow)
+        # Extracted age is 34, matches. No warning.
+        assert header["age"] == 34
+        assert len(warnings) == 0
+
+    def test_no_collected_at_skips_computed_check(self):
+        header = {"dob": "1990-03-08", "age": 82, "collected_at": None}
+        text_header = {"dob": "03/08/1990", "age": "82"}
+        warnings = _validate_header(header, text_header)
+        # Can't compute age without collection date, no age/DOB warning
+        assert header["age"] == 82
         assert len(warnings) == 0
