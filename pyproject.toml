@@ -1,0 +1,31 @@
+[project]
+name = "questy"
+version = "0.1.0"
+description = "Local-first Quest Diagnostics lab data import and MCP server for LLM analysis"
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40.0",
+    "pdf2image>=1.16.0",
+    "sqlalchemy>=2.0.0",
+]
+
+[project.optional-dependencies]
+mcp = ["fastmcp>=0.4.0"]
+dev = ["pytest>=7.0.0", "pytest-cov>=4.0.0", "ruff>=0.1.0"]
+
+[project.scripts]
+questy-import = "questy.localdb.cli:main"
+questy-mcp = "questy.mcp.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/questy"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "personal: tests requiring personal PDF data",
+]
