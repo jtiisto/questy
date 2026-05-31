@@ -217,6 +217,10 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
 
         Only SELECT and WITH queries are allowed. Data is stored in original lab units.
 
+        The exact test_name VALUE is the trap, not the column — a wrong value
+        returns 0 rows (not an error), so enumerate with get_available_tests
+        before filtering; do NOT guess.
+
         Args:
             query: SQL SELECT query to execute
             params: Optional list of parameters for ? placeholders
