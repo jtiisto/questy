@@ -97,10 +97,11 @@ Sends page 1 as a 150-DPI image to Claude, which returns structured JSON with pa
 
 ### Header cross-check (pdftotext)
 
-Runs `pdftotext` on page 1 and extracts DOB and age via regex. These deterministic text extractions are compared against the LLM output:
+Runs `pdftotext` on page 1 and extracts DOB, age and Lab Reference ID via regex. These deterministic text extractions are compared against the LLM output:
 
 - **DOB mismatch** — The pdftotext value replaces the LLM value (text extraction is more reliable for structured header fields)
 - **Age mismatch** — Same correction, preferring the text value
+- **Lab Reference ID mismatch** — Same correction, preferring the text value (the vision pass has kept label fragments like `ID:` and dropped digits)
 - **Age/DOB consistency** — Age is recomputed from DOB + collection date. If the extracted age differs by more than 1 year from the computed age, the computed value is used. This catches cases where both LLM and pdftotext agree on a wrong age but the DOB is correct (or vice versa)
 
 All corrections emit warnings that are surfaced to the user via the CLI.
@@ -122,7 +123,11 @@ Each result from the LLM goes through validation before being accepted:
 
 ### Deduplication
 
-Results from overlapping page batches are deduplicated by `(panel_name, test_name)`. The last occurrence is kept, as later batches may have more complete data (units, reference ranges from the following page).
+Results from overlapping page batches and the recovery pass are deduplicated by panel and matching test name (see *Test-name matching* below). The last occurrence is kept, as later batches may have more complete data (units, reference ranges from the following page).
+
+### Test-name matching
+
+The vision pass sometimes paraphrases a printed test name (`CHOL/HDL RATIO` for `CHOL/HDLC RATIO`). Names are compared case-insensitively, ignoring whitespace and hyphens, and two names of 6+ characters also match when one is the other with a single letter inserted. Digit insertions and substitutions never match, so T3/T4 and APOLIPOPROTEIN A1/B stay apart. When a result matches a pdftotext name, it is renamed to the text spelling: the text is deterministic, the model is not.
 
 ### Pass 3 — Recovery (pdftotext + vision)
 
@@ -135,17 +140,20 @@ Recovery outcomes are tracked:
 
 ### Pass 4 — Value verification (pdftotext)
 
-Every extracted numeric value is compared against the pdftotext output for the same test name. On mismatch (beyond 0.01 tolerance), the value is auto-corrected to the text-extracted value. This catches the most common LLM error: reading a number from a historical trend chart instead of the current result line.
+Every extracted numeric value is compared against the pdftotext output for the matching test name. On mismatch (beyond 0.01 tolerance), the value is auto-corrected to the text-extracted value. This catches the most common LLM error: reading a number from a historical trend chart instead of the current result line.
 
 ### Post-processing
 
 After all extraction passes, deterministic corrections are applied to fix known issues that neither the LLM nor pdftotext can reliably handle:
 
 - **Unit glyph corrections** — Some PDF fonts render characters differently than their Unicode mapping. For example, "fL" (femtoliters) is commonly misread as "IL" by both vision and text extraction due to font glyph mapping. A corrections map (`_UNIT_CORRECTIONS`) fixes these, updating both the `unit` field and `ref_range_text`.
+- **`(calc)` marker** — Quest prints `(calc)` beside the unit or reference range of calculated tests. It is removed from `unit` (`mg/dL (calc)` → `mg/dL`, `(calc)` → empty) and sets `is_calculated`; `ref_range_text` keeps it as printed.
 
 ### Database upsert
 
 Imports are idempotent. Re-importing the same PDF replaces all results, notes, and metadata for that collection date. The collection date is the natural primary key.
+
+`reports.pdf_path` is the path at import time, which may be a temp directory that no longer exists; `reports.pdf_sha256` identifies the imported file regardless. Databases created before `pdf_sha256` existed gain the column the next time questy opens them.
 
 ### Warning system
 
@@ -204,7 +212,7 @@ pip install -e '.[dev]'
 pytest
 ```
 
-148 tests covering parser models, helper functions (build/validate/deduplicate/cross-check/post-process), database operations (import, upsert, date tracking), MCP config validation, query security (SQL injection prevention, read-only enforcement), MCP server integration, and CLI argument parsing.
+181 tests covering parser models, helper functions (build/validate/deduplicate/cross-check/post-process), database operations (import, upsert, date tracking), MCP config validation, query security (SQL injection prevention, read-only enforcement), MCP server integration, and CLI argument parsing.
 
 ## Project Structure
 

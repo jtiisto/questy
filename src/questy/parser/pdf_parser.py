@@ -45,9 +45,21 @@ _UNIT_CORRECTIONS = {
 }
 
 
+# Quest prints "(calc)" next to the unit or reference range of calculated
+# tests; it is a marker, not part of the unit.
+_CALC_RE = re.compile(r"\s*\(calc\)\s*", re.IGNORECASE)
+
+
 def _post_process_results(results: list[ParsedResult]) -> list[ParsedResult]:
     """Apply deterministic post-processing corrections to extracted results."""
     for r in results:
+        # Move the "(calc)" marker out of the unit into is_calculated
+        if _CALC_RE.search(r.unit):
+            r.unit = _CALC_RE.sub(" ", r.unit).strip()
+            r.is_calculated = True
+        elif _CALC_RE.search(r.ref_range_text):
+            r.is_calculated = True
+
         # Fix known unit glyph errors
         if r.unit in _UNIT_CORRECTIONS:
             old_unit = r.unit
@@ -113,6 +125,7 @@ def parse_pdf(
     # Pass 3: Cross-check against raw text to catch missed results and
     # verify extracted values
     text_values = _extract_text_values(pdf_path)
+    _align_names_to_text(all_results, text_values)
     missed = _find_missed_names(text_values, all_results)
     if missed:
         warnings.append(ParseWarning(
@@ -126,12 +139,14 @@ def parse_pdf(
         recovered, extra_notes = _recover_missed(
             client, use_model, page_images, missed
         )
+        _align_names_to_text(recovered, text_values)
         all_results.extend(recovered)
         all_notes.extend(extra_notes)
 
         # Report on recovery outcome
-        recovered_names = {r.test_name.upper() for r in recovered}
-        still_missing = set(n.upper() for n in missed) - recovered_names
+        still_missing = set(_find_missed_names(
+            {n: text_values[n] for n in missed}, recovered
+        ))
         if still_missing:
             warnings.append(ParseWarning(
                 level="error",
@@ -416,19 +431,91 @@ def _build_note(raw: dict) -> ParsedNote | None:
 
 
 def _deduplicate_results(results: list[ParsedResult]) -> list[ParsedResult]:
-    """Remove duplicate results from page-boundary overlaps.
+    """Remove duplicate results from page-boundary overlaps and recovery.
 
-    Keeps the last occurrence (from the later batch) since it may have
-    more complete data (unit, ref range from the next page).
+    Results are duplicates when they share a panel and their test names
+    match (see _names_match), so a paraphrased name cannot slip past.
+    Keeps the last occurrence (from the later batch or the recovery pass)
+    since it may have more complete data (unit, ref range from the next
+    page), in the position of the first.
     """
-    seen: dict[tuple[str, str], int] = {}
-    for i, r in enumerate(results):
-        key = (r.panel_name, r.test_name)
-        seen[key] = i
+    kept: list[ParsedResult] = []
+    for r in results:
+        for i, k in enumerate(kept):
+            if k.panel_name == r.panel_name and _names_match(k.test_name, r.test_name):
+                kept[i] = r
+                break
+        else:
+            kept.append(r)
+    return kept
 
-    # Rebuild in original order, keeping only the last occurrence of each key
-    indices = sorted(seen.values())
-    return [results[i] for i in indices]
+
+# --- Test-name matching ---
+
+# The model sometimes paraphrases a printed test name ("CHOL/HDL RATIO" for
+# "CHOL/HDLC RATIO"). Names this short are left to exact matching: one letter
+# separates MCH from MCHC.
+_FUZZY_MIN_LEN = 6
+
+
+def _normalize_name(name: str) -> str:
+    """Uppercase and drop whitespace and hyphens, so "LDL-CHOLESTEROL",
+    "LDL CHOLESTEROL" and "ldl cholesterol" compare equal."""
+    return re.sub(r"[\s-]+", "", name.upper())
+
+
+def _names_match(a: str, b: str) -> bool:
+    """True if two test names refer to the same test.
+
+    Equal after normalization, or (for names of at least _FUZZY_MIN_LEN
+    characters) one is the other with a single letter inserted. Digit
+    insertions and substitutions never match: they tell apart tests like
+    T3/T4 and APOLIPOPROTEIN A1/B.
+    """
+    a, b = _normalize_name(a), _normalize_name(b)
+    if a == b:
+        return True
+    if len(a) > len(b):
+        a, b = b, a
+    if len(b) != len(a) + 1 or len(a) < _FUZZY_MIN_LEN:
+        return False
+    for i, c in enumerate(b):
+        if b[:i] + b[i + 1:] == a:
+            return c.isalpha()
+    return False
+
+
+def _match_text_name(name: str, text_names) -> str | None:
+    """Return the raw-text spelling that matches name, or None.
+
+    An exact match after normalization wins over a single-letter one.
+    """
+    normalized = _normalize_name(name)
+    for text_name in text_names:
+        if _normalize_name(text_name) == normalized:
+            return text_name
+    for text_name in text_names:
+        if _names_match(name, text_name):
+            return text_name
+    return None
+
+
+def _align_names_to_text(
+    results: list[ParsedResult],
+    text_values: dict[str, str],
+) -> None:
+    """Rename results to the raw-text spelling of their test name.
+
+    The text is deterministic and the model is not, so when the two
+    spellings differ the text wins. Results with no text match are left
+    as extracted.
+    """
+    for r in results:
+        if r.test_name.upper().strip() in text_values:
+            continue
+        text_name = _match_text_name(r.test_name, text_values)
+        if text_name is not None:
+            r.test_name = text_name
 
 
 # --- Text-based cross-check for header fields (DOB, age) ---
@@ -436,37 +523,41 @@ def _deduplicate_results(results: list[ParsedResult]) -> list[ParsedResult]:
 # Regex patterns for Quest Diagnostics header fields in pdftotext output
 _DOB_RE = re.compile(r"DOB[:\s]+(\d{2}/\d{2}/\d{4})")
 _AGE_RE = re.compile(r"Age[:\s]+(\d+)", re.IGNORECASE)
+_LAB_REF_RE = re.compile(r"Lab Reference ID:\s*([A-Z0-9-]+)", re.IGNORECASE)
 
 
 def _extract_header_from_text(pdf_path: Path) -> dict[str, str | None]:
-    """Extract DOB and age from raw PDF text via pdftotext.
-
-    Returns a dict with 'dob' (MM/DD/YYYY string) and 'age' (string).
-    These are deterministic text extractions, more reliable than LLM
-    vision for structured header fields.
-    """
+    """Extract page-1 header fields from raw PDF text via pdftotext."""
     result = subprocess.run(
         ["pdftotext", "-f", "1", "-l", "1", "-layout", str(pdf_path), "-"],
         capture_output=True,
         text=True,
     )
-    raw_text = result.stdout
-    if not raw_text:
-        return {"dob": None, "age": None}
+    return _parse_header_text(result.stdout)
 
+
+def _parse_header_text(raw_text: str) -> dict[str, str | None]:
+    """Extract DOB, age and lab reference ID from page-1 text.
+
+    Returns a dict with 'dob' (MM/DD/YYYY string), 'age' (string) and
+    'lab_reference_id' (string). These are deterministic text extractions,
+    more reliable than LLM vision for structured header fields.
+    """
     dob_match = _DOB_RE.search(raw_text)
     age_match = _AGE_RE.search(raw_text)
+    lab_ref_match = _LAB_REF_RE.search(raw_text)
 
     return {
         "dob": dob_match.group(1) if dob_match else None,
         "age": age_match.group(1) if age_match else None,
+        "lab_reference_id": lab_ref_match.group(1) if lab_ref_match else None,
     }
 
 
 def _validate_header(header: dict, text_header: dict) -> list[ParseWarning]:
     """Cross-check LLM-extracted header against text extraction.
 
-    Validates DOB and age fields. If the text extraction found values
+    Validates DOB, age and lab reference ID. If the text extraction found values
     that differ from the LLM extraction, auto-corrects to the text
     values (which are deterministic and more reliable for structured
     fields). Also validates that age is consistent with DOB and
@@ -512,6 +603,20 @@ def _validate_header(header: dict, text_header: dict) -> list[ParseWarning]:
             header["age"] = text_age
         elif text_age is not None and llm_age is None:
             header["age"] = text_age
+
+    # Cross-check lab reference ID
+    text_lab_ref = text_header.get("lab_reference_id")
+    if text_lab_ref:
+        llm_lab_ref = header.get("lab_reference_id")
+        if llm_lab_ref and llm_lab_ref != text_lab_ref:
+            warnings.append(ParseWarning(
+                level="warn",
+                message=(
+                    f"Lab reference ID corrected: LLM extracted {llm_lab_ref}, "
+                    f"text extraction found {text_lab_ref}. Using text value."
+                ),
+            ))
+        header["lab_reference_id"] = text_lab_ref
 
     # Validate age against DOB + collection date
     dob = _parse_date(header.get("dob"))
@@ -561,10 +666,11 @@ def _extract_text_values(pdf_path: Path) -> dict[str, str]:
         capture_output=True,
         text=True,
     )
-    raw_text = result.stdout
-    if not raw_text:
-        return {}
+    return _parse_text_values(result.stdout)
 
+
+def _parse_text_values(raw_text: str) -> dict[str, str]:
+    """Parse test name → raw value string from pdftotext -layout output."""
     values: dict[str, str] = {}
     for line in raw_text.split("\n"):
         line = line.strip()
@@ -586,8 +692,11 @@ def _find_missed_names(
     extracted: list[ParsedResult],
 ) -> list[str]:
     """Find test names in raw text that are missing from LLM extraction."""
-    extracted_names = {r.test_name.upper().strip() for r in extracted}
-    return sorted(name for name in text_values if name not in extracted_names)
+    extracted_names = [r.test_name for r in extracted]
+    return sorted(
+        name for name in text_values
+        if _match_text_name(name, extracted_names) is None
+    )
 
 
 def _verify_values(
@@ -604,8 +713,8 @@ def _verify_values(
     warnings: list[ParseWarning] = []
 
     for r in results:
-        key = r.test_name.upper().strip()
-        text_val_str = text_values.get(key)
+        key = _match_text_name(r.test_name, text_values)
+        text_val_str = text_values.get(key) if key else None
         if text_val_str is None or r.value is None:
             continue
 
@@ -668,7 +777,6 @@ def _recover_missed(
     # To stay within limits, send in batches of 4.
     all_results: list[ParsedResult] = []
     all_notes: list[ParsedNote] = []
-    missed_upper = {n.upper() for n in missed_names}
 
     for batch_start in range(0, len(page_images), _BATCH_SIZE):
         batch = page_images[batch_start : batch_start + _BATCH_SIZE]
@@ -697,7 +805,7 @@ def _recover_missed(
 
         for r in data.get("results", []):
             result = _build_result(r)
-            if result and result.test_name.upper() in missed_upper:
+            if result and _match_text_name(result.test_name, missed_names):
                 all_results.append(result)
 
         for n in data.get("notes", []):
@@ -706,8 +814,8 @@ def _recover_missed(
                 all_notes.append(note)
 
         # If we've found all missed results, stop early
-        found = {r.test_name.upper() for r in all_results}
-        if missed_upper <= found:
+        found = [r.test_name for r in all_results]
+        if all(_match_text_name(n, found) for n in missed_names):
             break
 
     return all_results, all_notes

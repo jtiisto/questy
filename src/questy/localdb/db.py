@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import create_engine, delete
+from sqlalchemy import create_engine, delete, inspect, text
 from sqlalchemy.orm import Session, sessionmaker
 
 from .models import Base, Note, Report, Result
@@ -18,11 +18,27 @@ class QuestyDB:
         self.engine = create_engine(f"sqlite:///{db_path}")
         self.SessionLocal = sessionmaker(bind=self.engine)
         Base.metadata.create_all(self.engine)
+        self._add_missing_columns()
+
+    def _add_missing_columns(self) -> None:
+        """Add columns introduced after a database was created.
+
+        create_all() makes missing tables but never alters existing ones.
+        """
+        existing = {c["name"] for c in inspect(self.engine).get_columns("reports")}
+        with self.engine.begin() as conn:
+            if "pdf_sha256" not in existing:
+                conn.execute(text("ALTER TABLE reports ADD COLUMN pdf_sha256 VARCHAR"))
 
     def get_session(self) -> Session:
         return self.SessionLocal()
 
-    def import_report(self, parsed_report, pdf_path: str | None = None) -> None:
+    def import_report(
+        self,
+        parsed_report,
+        pdf_path: str | None = None,
+        pdf_sha256: str | None = None,
+    ) -> None:
         """Import a ParsedReport into the database. Upserts by report_date."""
         report_date = parsed_report.report_date
         if report_date is None:
@@ -49,6 +65,7 @@ class QuestyDB:
                 reported_at=parsed_report.reported_at,
                 report_status=parsed_report.report_status,
                 pdf_path=pdf_path,
+                pdf_sha256=pdf_sha256,
                 imported_at=datetime.now(timezone.utc),
             )
             session.merge(report)

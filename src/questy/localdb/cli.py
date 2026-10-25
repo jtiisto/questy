@@ -1,6 +1,7 @@
 """CLI for importing Quest Diagnostics PDF reports."""
 
 import argparse
+import hashlib
 import sys
 from pathlib import Path
 
@@ -64,7 +65,11 @@ def main() -> int:
 
         try:
             parsed = parse_pdf(pdf_path, api_key=args.api_key, model=args.model)
-            db.import_report(parsed, pdf_path=str(pdf_path.resolve()))
+            db.import_report(
+                parsed,
+                pdf_path=str(pdf_path.resolve()),
+                pdf_sha256=hashlib.sha256(pdf_path.read_bytes()).hexdigest(),
+            )
             n_results = len(parsed.results)
             n_notes = len(parsed.notes)
             print(

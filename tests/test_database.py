@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from datetime import date, datetime
 
 import pytest
@@ -29,6 +30,31 @@ class TestQuestyDBInit:
         assert session.query(Result).count() == 0
         assert session.query(Note).count() == 0
         session.close()
+
+    def test_adds_pdf_sha256_to_existing_db(self, tmp_path, sample_report):
+        """A database created before pdf_sha256 existed gains the column."""
+        db_path = tmp_path / "old.db"
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            "CREATE TABLE reports (report_date DATE PRIMARY KEY, patient_name VARCHAR, "
+            "dob DATE, age INTEGER, sex VARCHAR, fasting BOOLEAN, specimen_id VARCHAR, "
+            "requisition_id VARCHAR, lab_reference_id VARCHAR, collected_at DATETIME, "
+            "received_at DATETIME, reported_at DATETIME, report_status VARCHAR, "
+            "pdf_path TEXT, imported_at DATETIME)"
+        )
+        conn.execute("INSERT INTO reports (report_date) VALUES ('2025-01-01')")
+        conn.commit()
+        conn.close()
+
+        db = QuestyDB(db_path)
+        db.import_report(sample_report, pdf_sha256="ab" * 32)
+
+        with db.get_session() as session:
+            assert session.get(Report, date(2025, 1, 1)).pdf_sha256 is None
+            assert session.get(Report, date(2025, 4, 11)).pdf_sha256 == "ab" * 32
+
+        # Opening it again does not try to add the column twice
+        QuestyDB(db_path)
 
 
 class TestImportReport:

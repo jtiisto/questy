@@ -44,7 +44,8 @@ group heading, NOT the individual test name.
 - "value_text": The raw value string exactly as printed \
 (e.g., "229", "<0.5", "152 H")
 - "value_prefix": "<" or ">" if the value has an inequality prefix, otherwise null
-- "unit": Unit of measurement (e.g., "mg/dL", "ng/mL", "%"), empty string if none
+- "unit": Unit of measurement (e.g., "mg/dL", "ng/mL", "%"), empty string if none. \
+Never include the "(calc)" marker in the unit; record it in is_calculated.
 - "flag": "H" if flagged high, "L" if flagged low, null if normal/in-range
 - "is_calculated": true if marked "(calc)", false otherwise
 - "ref_range_low": Lower bound of reference range as number, or null
@@ -64,7 +65,8 @@ more test data.
 
 Rules:
 - Extract EVERY test result shown. Do not skip any.
-- Preserve exact panel names and test names as printed.
+- Preserve exact panel names and test names as printed, character for \
+character (e.g., "CHOL/HDLC RATIO", not "CHOL/HDL RATIO").
 - For values like "<0.5", set value to 0.5, value_prefix to "<", \
 value_text to "<0.5".
 - For values like "152 H", set value to 152, flag to "H", \

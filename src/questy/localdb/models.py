@@ -26,7 +26,8 @@ class Report(Base):
     received_at = Column(DateTime)
     reported_at = Column(DateTime)
     report_status = Column(String)
-    pdf_path = Column(Text)
+    pdf_path = Column(Text)  # Import-time path; often a temp dir since removed
+    pdf_sha256 = Column(String)  # Hash of the imported PDF, for provenance
     imported_at = Column(DateTime, default=datetime.utcnow)
 
 
