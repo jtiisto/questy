@@ -20,6 +20,7 @@ import anthropic
 from pdf2image import convert_from_path
 
 from .models import ParsedNote, ParsedReport, ParsedResult, ParseWarning
+from .names import names_match, normalize_name
 from .prompt import (
     HEADER_PROMPT,
     HEADER_SCHEMA,
@@ -434,7 +435,7 @@ def _deduplicate_results(results: list[ParsedResult]) -> list[ParsedResult]:
     """Remove duplicate results from page-boundary overlaps and recovery.
 
     Results are duplicates when they share a panel and their test names
-    match (see _names_match), so a paraphrased name cannot slip past.
+    match (see names_match), so a paraphrased name cannot slip past.
     Keeps the last occurrence (from the later batch or the recovery pass)
     since it may have more complete data (unit, ref range from the next
     page), in the position of the first.
@@ -442,7 +443,7 @@ def _deduplicate_results(results: list[ParsedResult]) -> list[ParsedResult]:
     kept: list[ParsedResult] = []
     for r in results:
         for i, k in enumerate(kept):
-            if k.panel_name == r.panel_name and _names_match(k.test_name, r.test_name):
+            if k.panel_name == r.panel_name and names_match(k.test_name, r.test_name):
                 kept[i] = r
                 break
         else:
@@ -450,39 +451,7 @@ def _deduplicate_results(results: list[ParsedResult]) -> list[ParsedResult]:
     return kept
 
 
-# --- Test-name matching ---
-
-# The model sometimes paraphrases a printed test name ("CHOL/HDL RATIO" for
-# "CHOL/HDLC RATIO"). Names this short are left to exact matching: one letter
-# separates MCH from MCHC.
-_FUZZY_MIN_LEN = 6
-
-
-def _normalize_name(name: str) -> str:
-    """Uppercase and drop whitespace and hyphens, so "LDL-CHOLESTEROL",
-    "LDL CHOLESTEROL" and "ldl cholesterol" compare equal."""
-    return re.sub(r"[\s-]+", "", name.upper())
-
-
-def _names_match(a: str, b: str) -> bool:
-    """True if two test names refer to the same test.
-
-    Equal after normalization, or (for names of at least _FUZZY_MIN_LEN
-    characters) one is the other with a single letter inserted. Digit
-    insertions and substitutions never match: they tell apart tests like
-    T3/T4 and APOLIPOPROTEIN A1/B.
-    """
-    a, b = _normalize_name(a), _normalize_name(b)
-    if a == b:
-        return True
-    if len(a) > len(b):
-        a, b = b, a
-    if len(b) != len(a) + 1 or len(a) < _FUZZY_MIN_LEN:
-        return False
-    for i, c in enumerate(b):
-        if b[:i] + b[i + 1:] == a:
-            return c.isalpha()
-    return False
+# --- Matching extracted names to raw text ---
 
 
 def _match_text_name(name: str, text_names) -> str | None:
@@ -490,12 +459,12 @@ def _match_text_name(name: str, text_names) -> str | None:
 
     An exact match after normalization wins over a single-letter one.
     """
-    normalized = _normalize_name(name)
+    normalized = normalize_name(name)
     for text_name in text_names:
-        if _normalize_name(text_name) == normalized:
+        if normalize_name(text_name) == normalized:
             return text_name
     for text_name in text_names:
-        if _names_match(name, text_name):
+        if names_match(name, text_name):
             return text_name
     return None
 

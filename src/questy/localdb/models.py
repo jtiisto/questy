@@ -2,18 +2,33 @@
 
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, Date, DateTime, Float, Integer, String, Text
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import declarative_base
 
 Base = declarative_base()
 
 
 class Report(Base):
-    """Report-level metadata — one row per imported PDF."""
+    """Report-level metadata — one row per imported PDF.
+
+    Several reports can share a report_date: separate tests drawn the same day.
+    """
 
     __tablename__ = "reports"
 
-    report_date = Column(Date, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    report_date = Column(Date, nullable=False, index=True)
     patient_name = Column(String)
     dob = Column(Date)
     age = Column(Integer)
@@ -35,10 +50,13 @@ class Result(Base):
     """Individual test measurement — the core data table."""
 
     __tablename__ = "results"
+    __table_args__ = (UniqueConstraint("report_id", "panel_name", "test_name"),)
 
-    report_date = Column(Date, primary_key=True)
-    panel_name = Column(String, primary_key=True)
-    test_name = Column(String, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    report_id = Column(Integer, ForeignKey("reports.id"), index=True)
+    report_date = Column(Date, index=True)  # Copied from the report, for queries
+    panel_name = Column(String, nullable=False)
+    test_name = Column(String, nullable=False)
     value = Column(Float)  # Numeric part, NULL for unparseable/inequality
     value_text = Column(String)  # Raw: "229", "<0.5", "152 H"
     value_prefix = Column(String)  # "<", ">", NULL
@@ -56,6 +74,7 @@ class Note(Base):
     __tablename__ = "notes"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
+    report_id = Column(Integer, ForeignKey("reports.id"), index=True)
     report_date = Column(Date)
     panel_name = Column(String)
     test_name = Column(String)  # NULL for panel-level notes

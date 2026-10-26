@@ -13,11 +13,11 @@ import pytest
 
 from questy.parser import pdf_parser
 from questy.parser.models import ParsedResult
+from questy.parser.names import names_match
 from questy.parser.pdf_parser import (
     _align_names_to_text,
     _deduplicate_results,
     _find_missed_names,
-    _names_match,
     _parse_header_text,
     _parse_text_values,
     _post_process_results,
@@ -83,8 +83,8 @@ class TestNamesMatch:
         ("NON-HDL CHOLESTEROL", "NON HDL CHOLESTEROL"),
     ])
     def test_same_test(self, a, b):
-        assert _names_match(a, b)
-        assert _names_match(b, a)
+        assert names_match(a, b)
+        assert names_match(b, a)
 
     @pytest.mark.parametrize("a, b", [
         ("T3, FREE", "T4, FREE"),  # substitution
@@ -95,8 +95,8 @@ class TestNamesMatch:
         ("IRON, TOTAL", "IRON BINDING CAPACITY"),
     ])
     def test_different_tests(self, a, b):
-        assert not _names_match(a, b)
-        assert not _names_match(b, a)
+        assert not names_match(a, b)
+        assert not names_match(b, a)
 
 
 # --- text parsing ---

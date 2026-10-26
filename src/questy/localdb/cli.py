@@ -65,7 +65,7 @@ def main() -> int:
 
         try:
             parsed = parse_pdf(pdf_path, api_key=args.api_key, model=args.model)
-            db.import_report(
+            outcome = db.import_report(
                 parsed,
                 pdf_path=str(pdf_path.resolve()),
                 pdf_sha256=hashlib.sha256(pdf_path.read_bytes()).hexdigest(),
@@ -73,13 +73,20 @@ def main() -> int:
             n_results = len(parsed.results)
             n_notes = len(parsed.notes)
             print(
-                f"Imported: {pdf_path.name} "
+                f"{'Re-imported' if outcome.replaced else 'Imported'}: {pdf_path.name} "
                 f"(date: {parsed.report_date}, "
                 f"{n_results} results, {n_notes} notes)"
             )
+            if outcome.same_date_reports:
+                print(
+                    f"  Added alongside {outcome.same_date_reports} other "
+                    f"report(s) from {parsed.report_date}"
+                )
             for w in parsed.warnings:
                 prefix = "WARNING" if w.level == "warn" else "ERROR"
                 print(f"  {prefix}: {w.message}")
+            for c in outcome.conflicts:
+                print(f"  WARNING: Same-day reports disagree on {c}. Both values are stored.")
             success += 1
         except Exception as e:
             print(f"Failed: {pdf_path.name}: {e}")

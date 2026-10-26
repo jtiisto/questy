@@ -14,7 +14,7 @@ PDF report ──> questy-import ──> SQLite ──> questy-mcp ──> LLM
 Three modules, cleanly separated:
 
 - **Parser** (`questy.parser`) — Converts Quest PDFs to structured data using Claude vision API, with pdftotext cross-checks
-- **Database** (`questy.localdb`) — SQLAlchemy ORM, idempotent import (upsert by collection date)
+- **Database** (`questy.localdb`) — SQLAlchemy ORM, additive, idempotent import (one report per PDF, several per date)
 - **MCP Server** (`questy.mcp`) — Read-only FastMCP server with 9 tools for LLM querying
 
 ## Setup
@@ -149,11 +149,15 @@ After all extraction passes, deterministic corrections are applied to fix known 
 - **Unit glyph corrections** — Some PDF fonts render characters differently than their Unicode mapping. For example, "fL" (femtoliters) is commonly misread as "IL" by both vision and text extraction due to font glyph mapping. A corrections map (`_UNIT_CORRECTIONS`) fixes these, updating both the `unit` field and `ref_range_text`.
 - **`(calc)` marker** — Quest prints `(calc)` beside the unit or reference range of calculated tests. It is removed from `unit` (`mg/dL (calc)` → `mg/dL`, `(calc)` → empty) and sets `is_calculated`; `ref_range_text` keeps it as printed.
 
-### Database upsert
+### Database import
 
-Imports are idempotent. Re-importing the same PDF replaces all results, notes, and metadata for that collection date. The collection date is the natural primary key.
+Imports are additive: each PDF is its own report, and separate tests drawn on the same day sit side by side under the same `report_date`. Re-importing a report replaces only that report's results, notes and metadata. A re-import is recognized by the PDF's SHA-256, or by the same collection date, specimen ID and requisition ID (a re-downloaded or amended copy). Two orders from one specimen carry different requisitions and stay separate.
 
-`reports.pdf_path` is the path at import time, which may be a temp directory that no longer exists; `reports.pdf_sha256` identifies the imported file regardless. Databases created before `pdf_sha256` existed gain the column the next time questy opens them.
+When a test in the new report also appears in another report from the same day (names matched as in *Test-name matching*, panels ignored), the import compares them. Equal values pass silently. A different value or unit prints a warning naming both values and the other report; both rows are stored.
+
+`reports.pdf_path` is the path at import time, which may be a temp directory that no longer exists; `reports.pdf_sha256` identifies the imported file regardless.
+
+Databases from before this (reports keyed by `report_date`) are rebuilt the next time `questy-import` opens them, in one transaction: every report gets an `id`, and results and notes are linked to it. The data is copied unchanged.
 
 ### Warning system
 
@@ -183,13 +187,13 @@ The MCP server enforces read-only access: SQLite connections use `?mode=ro`, and
 
 ### reports
 
-One row per imported PDF. Primary key: `report_date` (specimen collection date).
+One row per imported PDF. Primary key: `id`. `report_date` (specimen collection date) is indexed but not unique.
 
-Patient metadata, specimen IDs, timing (collected/received/reported), fasting status, and path to the source PDF.
+Patient metadata, specimen IDs, timing (collected/received/reported), fasting status, and the source PDF's path and SHA-256.
 
 ### results
 
-One row per test measurement. Composite primary key: `(report_date, panel_name, test_name)`.
+One row per test measurement. Primary key: `id`; `report_id` references `reports.id`, and `(report_id, panel_name, test_name)` is unique. `report_date` is copied from the report so queries by date need no join. A test measured by two same-day reports has two rows.
 
 - `value` (REAL) — Numeric value, NULL for inequalities
 - `value_text` (TEXT) — Raw value as printed: `"229"`, `"<0.5"`, `"152 H"`
@@ -203,7 +207,7 @@ Values are stored in original lab units (no conversion).
 
 ### notes
 
-Clinical notes, comments, risk categories, and methodology notes. Linked to reports by `report_date`, scoped to a panel and optionally a specific test.
+Clinical notes, comments, risk categories, and methodology notes. Linked to reports by `report_id` (with `report_date` copied), scoped to a panel and optionally a specific test.
 
 ## Testing
 
@@ -212,7 +216,7 @@ pip install -e '.[dev]'
 pytest
 ```
 
-181 tests covering parser models, helper functions (build/validate/deduplicate/cross-check/post-process), database operations (import, upsert, date tracking), MCP config validation, query security (SQL injection prevention, read-only enforcement), MCP server integration, and CLI argument parsing.
+194 tests covering parser models, helper functions (build/validate/deduplicate/cross-check/post-process), database operations (additive import, re-import, same-day conflicts, schema migration), MCP config validation, query security (SQL injection prevention, read-only enforcement), MCP server integration, and CLI argument parsing.
 
 ## Project Structure
 
@@ -221,10 +225,11 @@ src/questy/
   parser/
     models.py        # ParsedReport, ParsedResult, ParsedNote, ParseWarning
     pdf_parser.py    # Claude vision extraction + pdftotext cross-checks
+    names.py         # Test-name matching (parser and database)
     prompt.py        # Extraction prompts and JSON schemas
   localdb/
     models.py        # SQLAlchemy ORM (Report, Result, Note)
-    db.py            # QuestyDB — session management, import/upsert
+    db.py            # QuestyDB — session management, import, schema migration
     cli.py           # questy-import command
   mcp/
     server.py        # FastMCP server with 9 tools + data guide resource

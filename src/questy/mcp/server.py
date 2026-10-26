@@ -314,7 +314,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
             raise ValueError("test_name is required")
 
         rows = db_manager.execute_safe_query("""
-            SELECT r.report_date, r.value, r.value_text, r.value_prefix,
+            SELECT r.report_date, r.report_id, r.value, r.value_text, r.value_prefix,
                    r.unit, r.flag, r.ref_range_text, r.ref_range_low,
                    r.ref_range_high, r.panel_name
             FROM results r
@@ -515,7 +515,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
 
 def _get_table_description(table_name: str) -> str:
     descriptions = {
-        "reports": "Report-level metadata — one row per imported PDF with patient info, specimen details, and dates",
+        "reports": "Report-level metadata — one row per imported PDF with patient info, specimen details, and dates; several reports can share a report_date",
         "results": "Individual test measurements — the core data table with values, units, flags, and reference ranges",
         "notes": "Clinical notes, comments, risk categories, and methodology notes per test or panel",
     }
@@ -538,7 +538,9 @@ def _get_data_guide() -> str:
 ## Database Tables
 
 ### reports (one row per imported PDF)
-- `report_date` (DATE PK): Specimen collection date
+- `id` (INTEGER PK): Report identifier
+- `report_date` (DATE): Specimen collection date. Not unique: separate tests drawn
+  the same day are separate reports with the same date
 - `patient_name` (TEXT): Patient name
 - `dob` (DATE): Date of birth
 - `age` (INTEGER): Age at time of report
@@ -549,11 +551,15 @@ def _get_data_guide() -> str:
 - `lab_reference_id` (TEXT): Lab reference ID
 - `collected_at`, `received_at`, `reported_at` (DATETIME): Timing
 - `report_status` (TEXT): e.g., "FINAL / SEE REPORT"
+- `pdf_sha256` (TEXT): Hash of the imported PDF (NULL for older imports)
 
 ### results (core data — one row per test measurement)
-- `report_date` (DATE PK/FK): References reports
-- `panel_name` (TEXT PK): Panel grouping, e.g., "LIPID PANEL, STANDARD"
-- `test_name` (TEXT PK): Test name, e.g., "CHOLESTEROL, TOTAL"
+- `id` (INTEGER PK): Auto-increment
+- `report_id` (INTEGER FK): References reports.id
+- `report_date` (DATE): Collection date, copied from the report
+- `panel_name` (TEXT): Panel grouping, e.g., "LIPID PANEL, STANDARD"
+- `test_name` (TEXT): Test name, e.g., "CHOLESTEROL, TOTAL". Unique per
+  (report_id, panel_name); a test measured by two same-day reports has two rows
 - `value` (REAL): Numeric value (NULL for inequalities like "<0.5")
 - `value_text` (TEXT): Raw value text: "229", "152 H", "<0.5"
 - `value_prefix` (TEXT): "<" or ">" for inequality values, NULL otherwise
@@ -566,7 +572,8 @@ def _get_data_guide() -> str:
 
 ### notes (clinical text per test/panel)
 - `id` (INTEGER PK): Auto-increment
-- `report_date` (DATE FK): References reports
+- `report_id` (INTEGER FK): References reports.id
+- `report_date` (DATE): Collection date, copied from the report
 - `panel_name` (TEXT): Panel the note belongs to
 - `test_name` (TEXT): NULL for panel-level notes
 - `note_type` (TEXT): "comment", "risk_category", "clinical", "methodology"
