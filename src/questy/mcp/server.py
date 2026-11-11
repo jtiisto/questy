@@ -360,11 +360,12 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
         get_available_tests lists the valid names. The same test in two
         same-day reports gives two points.
 
-        Result: test_name (as passed), unit, data_points and trends, rows with
-        report_date, report_id, value, value_text, value_prefix, unit, flag,
-        ref_range_text, ref_range_low, ref_range_high, panel_name. An unknown
-        name gives data_points 0, a message and suggestions: up to 10 test
-        names containing the text.
+        Result: test_name as stored (the spelling to use in SQL), unit,
+        data_points and trends, rows with test_name, report_date, report_id,
+        value, value_text, value_prefix, unit, flag, ref_range_text,
+        ref_range_low, ref_range_high, panel_name. An unknown name gives
+        data_points 0, a message and suggestions: up to 10 test names
+        containing the text.
 
         Args:
             test_name: The test name, e.g. "LDL-CHOLESTEROL", "HEMOGLOBIN A1c",
@@ -375,8 +376,8 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
             raise ValueError("test_name is required")
 
         rows = db_manager.execute_safe_query("""
-            SELECT r.report_date, r.report_id, r.value, r.value_text, r.value_prefix,
-                   r.unit, r.flag, r.ref_range_text, r.ref_range_low,
+            SELECT r.test_name, r.report_date, r.report_id, r.value, r.value_text,
+                   r.value_prefix, r.unit, r.flag, r.ref_range_text, r.ref_range_low,
                    r.ref_range_high, r.panel_name
             FROM results r
             WHERE UPPER(r.test_name) = UPPER(?)

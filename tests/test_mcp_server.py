@@ -205,8 +205,10 @@ class TestMCPToolCalls:
 
     def test_get_test_trends(self, tools):
         result = tools["get_test_trends"]("ldl-cholesterol")
+        assert result["test_name"] == "LDL-CHOLESTEROL", "the stored spelling, not the caller's"
         assert result["data_points"] == 1
         assert result["unit"] == "mg/dL"
+        assert result["trends"][0]["test_name"] == "LDL-CHOLESTEROL"
         assert result["trends"][0]["value"] == 152.0
         assert result["trends"][0]["flag"] == "H"
 
