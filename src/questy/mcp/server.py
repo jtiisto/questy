@@ -36,8 +36,9 @@ Read-only: SQL is SELECT/WITH only, one statement, rows capped at max_rows.
   common views; execute_sql_query for anything else. Unsure of columns:
   get_table_details, never guess.
 - Exact values are the trap, not the columns. test_name and panel_name are
-  the lab's spelling: uppercase, inconsistently hyphenated and spaced
-  ("LDL-CHOLESTEROL", "HEMOGLOBIN A1C", "LIPID PANEL, STANDARD"). A wrong
+  the lab's spelling: mostly upper-case, some mixed case ("LDL-CHOLESTEROL",
+  "HEMOGLOBIN A1c", "LIPID PANEL, STANDARD"), inconsistently hyphenated and
+  spaced. SQL equality is case-sensitive; get_test_trends is not. A wrong
   value returns 0 rows, not an error, so enumerate with get_available_tests
   before filtering; do NOT guess, and do not conclude "no data" from 0 rows.
 - Several reports can share a report_date (separate tests drawn the same
@@ -51,7 +52,7 @@ Read-only: SQL is SELECT/WITH only, one statement, rows capped at max_rows.
   bounds. Compare a value against the range on its own report_date, since
   ranges change (get_reference_range_changes).
 - is_calculated marks derived tests ("(calc)"), such as LDL-CHOLESTEROL.
-- Full guide: resource file://questy_data_guide.
+- Full guide: resource file://questy_data_guide/.
 """
 
 
@@ -365,7 +366,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
         names containing the text.
 
         Args:
-            test_name: The test name, e.g. "LDL-CHOLESTEROL", "HEMOGLOBIN A1C",
+            test_name: The test name, e.g. "LDL-CHOLESTEROL", "HEMOGLOBIN A1c",
                 "TSH". Case-insensitive; use get_available_tests to see valid
                 names.
         """

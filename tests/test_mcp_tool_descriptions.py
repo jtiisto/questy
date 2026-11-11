@@ -39,6 +39,11 @@ description still carries it, since a description is read on its own.
 The sample queries on execute_sql_query are run against the synthetic
 database: a query that names a column or a test spelling the schema does not
 have would teach the model wrong SQL.
+
+A resource the instructions point at must be listed under exactly that URI:
+FastMCP lists a `file://` URI with a trailing slash, and Claude Code's resource
+reader rejects the slash-less form, so a pointer written from the decorator
+string rather than the wire would send the model to a resource it cannot open.
 """
 
 import inspect
@@ -50,7 +55,7 @@ from questy.localdb.db import QuestyDB
 from questy.mcp.config import MCPConfig
 from questy.mcp.server import create_mcp_server
 from tests.conftest import make_multi_result_report
-from tests.mcp_tools import list_tools, server_instructions
+from tests.mcp_tools import list_tools, server_instructions, server_resources
 
 EXPECTED_TOOLS = [
     "explore_database_structure", "get_table_details", "execute_sql_query",
@@ -71,10 +76,13 @@ RULES_IN_INSTRUCTIONS = [
     "get_available_tests",
     "0 rows, not an error",
     "do NOT guess",
+    "mixed case",
+    "HEMOGLOBIN A1c",
+    "SQL equality is case-sensitive; get_test_trends is not",
     "share a report_date",
     "as the lab printed them",
     "value_prefix",
-    "file://questy_data_guide",
+    "file://questy_data_guide/",
 ]
 # The one-line form execute_sql_query keeps on its own.
 RULES_ON_EXECUTE_SQL_QUERY = [
@@ -85,6 +93,7 @@ RULES_ON_EXECUTE_SQL_QUERY = [
 ]
 
 _ARGS_HEADING = re.compile(r"^Args:$", re.MULTILINE)
+_FILE_URI = re.compile(r"""file://[^\s"')]+""")
 _ARGS_ENTRY = re.compile(r"^(\w+)(\s*\([^)]*\))?:(.*)$")
 
 
@@ -106,6 +115,12 @@ def listed_tools(server):
 def instructions(server):
     """The instructions text as the initialize handshake delivers it to a client."""
     return server_instructions(server)
+
+
+@pytest.fixture(scope="module")
+def resource_uris(server):
+    """The resource URIs as a client lists them."""
+    return server_resources(server)
 
 
 def _split_docstring(doc):
@@ -270,3 +285,14 @@ class TestServerInstructions:
     def test_instructions_carry_the_standing_rules(self, instructions, marker):
         assert marker in _normalise(instructions or ""), (
             f"the instructions lost {marker!r}")
+
+    def test_every_resource_pointer_is_listed_verbatim(self, instructions, resource_uris):
+        """Each file:// URI the instructions name is one the client can open:
+        it appears in the resource listing exactly as written."""
+        named = [uri.rstrip(".,") for uri in _FILE_URI.findall(instructions or "")]
+        assert named, "the instructions point at no file:// resource"
+        for uri in named:
+            assert uri in resource_uris, (
+                f"the instructions point at {uri!r}, but the server lists "
+                f"{resource_uris}: FastMCP lists a file:// URI with a trailing "
+                "slash, and the client rejects the slash-less form")

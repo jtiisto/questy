@@ -34,6 +34,24 @@ def server_instructions(mcp_server):
         return pool.submit(asyncio.run, handshake()).result()
 
 
+def server_resources(mcp_server):
+    """Return the URIs of the resources `mcp_server` lists, as strings.
+
+    Listed the way a client lists them, through an in-memory `fastmcp.Client`
+    (`mode="legacy"`, as in `server_instructions`), so the URIs carry whatever
+    normalisation FastMCP applies on the wire (a `file://` URI gets a trailing
+    slash). Same worker-thread pattern as `list_tools`.
+    """
+    from fastmcp import Client
+
+    async def listing():
+        async with Client(mcp_server, mode="legacy") as client:
+            return [str(resource.uri) for resource in await client.list_resources()]
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, listing()).result()
+
+
 def extract_tools(mcp_server):
     """Return `{function __name__: function}` for every tool `mcp_server` lists."""
     return {tool.fn.__name__: tool.fn for tool in list_tools(mcp_server)}
