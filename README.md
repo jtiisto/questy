@@ -15,7 +15,7 @@ Three modules, cleanly separated:
 
 - **Parser** (`questy.parser`) — Converts Quest PDFs to structured data using Claude vision API, with pdftotext cross-checks
 - **Database** (`questy.localdb`) — SQLAlchemy ORM, additive, idempotent import (one report per PDF, several per date)
-- **MCP Server** (`questy.mcp`) — Read-only FastMCP server with 9 tools for LLM querying
+- **MCP Server** (`questy.mcp`) — Read-only FastMCP 4.x server with 9 tools for LLM querying
 
 ## Setup
 
@@ -183,6 +183,10 @@ This gives the user full visibility into what the parser corrected automatically
 
 The MCP server enforces read-only access: SQLite connections use `?mode=ro`, and a `QueryValidator` rejects any non-SELECT/WITH queries and blocks forbidden keywords (INSERT, UPDATE, DELETE, DROP, PRAGMA, etc.).
 
+### What the model sees
+
+FastMCP 4.x builds a tool's client-visible description from the docstring text above its first structured section and turns each `Args:` entry into that parameter's schema description; every other section (`Returns:`, `Example queries:`, `Note:`) is cut and the model never sees it. So every tool docstring keeps all it has to say above `Args:`: terse lines and flush-left `- ` bullets, the result shape as a `Result: ...` line, sample queries as `Sample queries:` bullets. It ends with `Args:` (omitted for a parameterless tool) and has no other section. Outside the `Args:` block, never an indented line directly under a line ending in a colon (the parser reads it as a section), and never a parenthesised annotation after a parameter name. Every description leads with `WHEN TO USE:` and fits 2,048 characters, the cut older Claude Code versions apply. The server also sends `instructions` of at most 4,096 characters (Claude Code loads only tool names and instructions at session start) carrying the rules that hold for every tool: read-only SELECT/WITH, the exact-value trap on `test_name` and `panel_name`, several reports per `report_date`, units as the lab printed them, and a pointer to the `file://questy_data_guide` resource. A fact about one tool stays on that tool. `tests/test_mcp_tool_descriptions.py` fails if any docstring or parameter text is hidden from the client, a description or the instructions outgrows its cut, or a sample query no longer runs against the schema.
+
 ## Database Schema
 
 ### reports
@@ -216,7 +220,7 @@ pip install -e '.[dev]'
 pytest
 ```
 
-194 tests covering parser models, helper functions (build/validate/deduplicate/cross-check/post-process), database operations (additive import, re-import, same-day conflicts, schema migration), MCP config validation, query security (SQL injection prevention, read-only enforcement), MCP server integration, and CLI argument parsing.
+277 tests covering parser models, helper functions (build/validate/deduplicate/cross-check/post-process), database operations (additive import, re-import, same-day conflicts, schema migration), MCP config validation, query security (SQL injection prevention, read-only enforcement), MCP server integration (every tool called against a synthetic database), the tool-description contract above, and CLI argument parsing.
 
 ## Project Structure
 
@@ -232,7 +236,7 @@ src/questy/
     db.py            # QuestyDB — session management, import, schema migration
     cli.py           # questy-import command
   mcp/
-    server.py        # FastMCP server with 9 tools + data guide resource
+    server.py        # FastMCP 4.x server with 9 tools + data guide resource
     config.py        # MCPConfig with validation
     cli.py           # questy-mcp command
 tests/
@@ -242,6 +246,8 @@ tests/
   test_database.py            # DB operations with temp SQLite
   test_mcp_config.py          # Config validation
   test_mcp_query_validator.py # SQL security
-  test_mcp_server.py          # Server integration
+  test_mcp_server.py          # Server integration, every tool called
+  test_mcp_tool_descriptions.py # Tool text and instructions reach the client whole
+  mcp_tools.py                # list_tools / server_instructions helpers
   test_cli.py                 # CLI argument parsing
 ```

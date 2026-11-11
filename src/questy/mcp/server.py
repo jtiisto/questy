@@ -20,6 +20,40 @@ except ImportError:
 
 from .config import MCPConfig
 
+# Server instructions: sent in the initialize handshake and loaded by the
+# client at session start, before any tool description. Rules that hold for
+# every tool live here; the guard test holds them under the client's
+# 4,096-character cut.
+INSTRUCTIONS = """\
+Quest Diagnostics lab data: one row per imported PDF report (reports), one
+row per test measurement (results: panel_name, test_name, value, unit, flag,
+reference range) and the lab's clinical notes (notes). Use these tools for
+lab values, trends over time, flagged results and reference ranges.
+Read-only: SQL is SELECT/WITH only, one statement, rows capped at max_rows.
+
+- Start with get_report_summary; get_available_tests for the test names;
+  get_panel_results, get_test_trends and get_out_of_range_results for the
+  common views; execute_sql_query for anything else. Unsure of columns:
+  get_table_details, never guess.
+- Exact values are the trap, not the columns. test_name and panel_name are
+  the lab's spelling: uppercase, inconsistently hyphenated and spaced
+  ("LDL-CHOLESTEROL", "HEMOGLOBIN A1C", "LIPID PANEL, STANDARD"). A wrong
+  value returns 0 rows, not an error, so enumerate with get_available_tests
+  before filtering; do NOT guess, and do not conclude "no data" from 0 rows.
+- Several reports can share a report_date (separate tests drawn the same
+  day), so MAX(report_date) picks a date, not one report; the same test in
+  two same-day reports has two rows. Dates are YYYY-MM-DD.
+- Units are as the lab printed them, no conversion; unit is a column on
+  every row. An inequality result ("<0.5") has value NULL, value_prefix "<"
+  or ">" and the number in value_text; use value_text when value is NULL.
+- flag is "H" (above range), "L" (below) or NULL (in range or no range).
+  ref_range_text is the range as printed; ref_range_low/high are its parsed
+  bounds. Compare a value against the range on its own report_date, since
+  ranges change (get_reference_range_changes).
+- is_calculated marks derived tests ("(calc)"), such as LDL-CHOLESTEROL.
+- Full guide: resource file://questy_data_guide.
+"""
+
 
 class SQLiteConnection:
     """Secure SQLite connection context manager for read-only access."""
@@ -125,17 +159,19 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
     """Create and configure the Quest Diagnostics MCP server."""
     config.validate()
     db_manager = DatabaseManager(config)
-    mcp = FastMCP("Quest Diagnostics Lab Data Explorer")
+    mcp = FastMCP("Quest Diagnostics Lab Data Explorer", instructions=INSTRUCTIONS)
 
     @mcp.tool()
     def explore_database_structure() -> Dict[str, Any]:
         """WHEN TO USE: When you need to understand what lab data is available.
 
-        Starting point for exploring Quest Diagnostics data. Shows tables,
-        row counts, date ranges, and available panels/tests.
+        Starting point for exploring Quest Diagnostics data: the tables, their
+        row counts and report_date ranges. For the panels and tests themselves
+        call get_report_summary or get_available_tests.
 
-        Returns:
-            Database structure with tables, row counts, and date ranges
+        Result: available_tables, a dict per table with row_count, description
+        and (for reports, results and notes) date_range {earliest, latest};
+        plus a usage_tip.
         """
         tables_query = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
         tables = db_manager.execute_safe_query(tables_query)
@@ -171,11 +207,15 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
     def get_table_details(table_name: str) -> Dict[str, Any]:
         """WHEN TO USE: When you need to see the structure and sample data of a specific table.
 
+        Use after explore_database_structure, and before writing SQL, to see a
+        table's columns and real rows; do not guess column names.
+
+        Result: table_name, columns (name, type, required, is_primary_key), the
+        3 most recently inserted rows as sample_data, and the table's
+        description.
+
         Args:
             table_name: Name of the table (reports, results, or notes)
-
-        Returns:
-            Table structure with columns, data types, and sample records
         """
         if not table_name or not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", table_name):
             raise ValueError("Invalid table name format")
@@ -215,23 +255,30 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
     def execute_sql_query(query: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
         """WHEN TO USE: When you need to run custom SQL queries against the lab data.
 
-        Only SELECT and WITH queries are allowed. Data is stored in original lab units.
+        Only SELECT and WITH queries are allowed; one statement, no PRAGMA. Rows
+        are capped at the server's max_rows (default 1000) unless the query has
+        LIMIT. Values are stored in original lab units, no conversion; an
+        inequality result ("<0.5") has value NULL, value_prefix "<" or ">" and
+        the number in value_text.
 
         The exact test_name VALUE is the trap, not the column — a wrong value
         returns 0 rows (not an error), so enumerate with get_available_tests
-        before filtering; do NOT guess.
+        before filtering; do NOT guess. The same holds for panel_name.
+        Several reports can share a report_date (separate tests drawn the same
+        day), so MAX(report_date) selects a date, not one report; filter on
+        report_id to stay within one report.
+
+        Sample queries:
+        - Results on the latest date: SELECT test_name, value, unit, flag, ref_range_text FROM results WHERE report_date = (SELECT MAX(report_date) FROM reports) ORDER BY panel_name, test_name
+        - Trend for a test: SELECT report_date, value, flag, ref_range_text FROM results WHERE test_name = 'LDL-CHOLESTEROL' ORDER BY report_date
+        - Out of range on the latest date: SELECT test_name, value, unit, flag, ref_range_text FROM results WHERE flag IS NOT NULL AND report_date = (SELECT MAX(report_date) FROM reports)
+        - Notes for a test: SELECT report_date, note_type, content FROM notes WHERE test_name = 'LDL-CHOLESTEROL' ORDER BY report_date
+
+        Result: list of matching rows as dicts.
 
         Args:
             query: SQL SELECT query to execute
             params: Optional list of parameters for ? placeholders
-
-        Example queries:
-        - All results for latest report: "SELECT test_name, value, unit, flag, ref_range_text FROM results WHERE report_date = (SELECT MAX(report_date) FROM reports) ORDER BY panel_name, test_name"
-        - Trend for a test: "SELECT report_date, value, flag, ref_range_text FROM results WHERE test_name = 'LDL-CHOLESTEROL' ORDER BY report_date"
-        - Out of range: "SELECT test_name, value, unit, flag, ref_range_text FROM results WHERE flag IS NOT NULL AND report_date = (SELECT MAX(report_date) FROM reports)"
-
-        Returns:
-            List of matching records as dictionaries
         """
         if not query or not query.strip():
             raise ValueError("Query cannot be empty")
@@ -241,11 +288,16 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
     def get_report_summary() -> Dict[str, Any]:
         """WHEN TO USE: When you want a quick overview of all lab reports.
 
-        Provides total report count, date range, latest report panels and
-        out-of-range results.
+        Total report count, date range, and the latest report_date's panels and
+        out-of-range results. Several reports can share a report_date; the
+        "latest" sections cover every report on the latest date.
 
-        Returns:
-            Summary with report count, date range, latest report details
+        Result: total_reports, date_range {first, latest}, latest_report
+        (report_date, patient_name, age, sex, fasting of one report on the
+        latest date), latest_panels (panel_name, test_count),
+        latest_out_of_range (test_name, value_text, unit, flag, ref_range_text,
+        panel_name) and total_unique_tests. With no reports: total_reports 0
+        and a message.
         """
         overview = db_manager.execute_safe_query("""
             SELECT COUNT(*) as total_reports,
@@ -300,15 +352,22 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
     def get_test_trends(test_name: str) -> Dict[str, Any]:
         """WHEN TO USE: When you need to see how a specific test has changed over time.
 
-        Returns time-series data for a test across all reports including values,
-        reference ranges, and flags.
+        Time series of one test across all reports: values, reference ranges
+        and flags per report_date, oldest first. The name must match the lab's
+        spelling exactly apart from case ("LDL-CHOLESTEROL", not "LDL");
+        get_available_tests lists the valid names. The same test in two
+        same-day reports gives two points.
+
+        Result: test_name (as passed), unit, data_points and trends, rows with
+        report_date, report_id, value, value_text, value_prefix, unit, flag,
+        ref_range_text, ref_range_low, ref_range_high, panel_name. An unknown
+        name gives data_points 0, a message and suggestions: up to 10 test
+        names containing the text.
 
         Args:
-            test_name: The test name (e.g., "LDL-CHOLESTEROL", "HEMOGLOBIN A1C", "TSH").
-                       Case-insensitive; use get_available_tests() to see valid names.
-
-        Returns:
-            Time-series data with values, reference ranges, and flags per report date
+            test_name: The test name, e.g. "LDL-CHOLESTEROL", "HEMOGLOBIN A1C",
+                "TSH". Case-insensitive; use get_available_tests to see valid
+                names.
         """
         if not test_name or not test_name.strip():
             raise ValueError("test_name is required")
@@ -352,17 +411,21 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
         """WHEN TO USE: When you need lab results grouped by panel.
 
         Modes:
-        - No args: all panels from latest report with results
-        - panel_name only: that panel from latest report
-        - report_date only: all panels from that date
-        - Both: specific panel from specific date
+        - No args: all panels on the latest report_date
+        - panel_name only: that panel on the latest report_date
+        - report_date only: all panels on that date
+        - Both: that panel on that date
+        panel_name is matched case-insensitively but otherwise exactly ("LIPID
+        PANEL, STANDARD"); a wrong value gives panel_count 0, not an error.
+        get_available_tests shows each test's panel names.
+
+        Result: report_date, panel_count and panels, a dict of panel_name to
+        its rows (panel_name, test_name, value, value_text, unit, flag,
+        is_calculated, ref_range_text). With no reports: a message.
 
         Args:
-            panel_name: Panel name (e.g., "LIPID PANEL, STANDARD", "CBC (INCLUDES DIFF/PLT)")
+            panel_name: Panel name, e.g. "LIPID PANEL, STANDARD", "CBC (INCLUDES DIFF/PLT)"
             report_date: Report date as string (YYYY-MM-DD)
-
-        Returns:
-            Panel results with test values, units, flags, and reference ranges
         """
         if report_date:
             date_filter = report_date
@@ -405,13 +468,15 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
     def get_out_of_range_results(report_date: Optional[str] = None) -> Dict[str, Any]:
         """WHEN TO USE: When you need to see which results are flagged as abnormal.
 
-        Returns all results flagged H (high) or L (low).
+        All results flagged H (above the reference range) or L (below it) on
+        one report_date; every report on that date is included.
+
+        Result: report_date, flagged_count and results, rows with panel_name,
+        test_name, value, value_text, unit, flag, ref_range_text,
+        ref_range_low, ref_range_high. With no reports: a message.
 
         Args:
-            report_date: Optional date (YYYY-MM-DD). Defaults to latest report.
-
-        Returns:
-            Flagged results with values, reference ranges, and panel context
+            report_date: Optional date (YYYY-MM-DD). Defaults to the latest report_date.
         """
         if report_date:
             date_filter = report_date
@@ -439,11 +504,14 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
     def get_reference_range_changes() -> Dict[str, Any]:
         """WHEN TO USE: When you need to check if reference ranges have changed between reports.
 
-        Compares reference ranges for the same test across reports.
-        Useful for tracking when Quest updates their reference intervals.
+        Compares ref_range_text for the same test_name across all reports and
+        lists the tests whose range text differs between reports: Quest
+        updated the interval, or printed it differently. Compare a value
+        against the range on its own report_date, not the latest.
 
-        Returns:
-            Tests where reference ranges differ between reports
+        Result: tests_with_changes and changes, one dict per test with
+        test_name, unit and ranges_by_date, a list of {report_date,
+        ref_range_text} for every row of that test.
         """
         rows = db_manager.execute_safe_query("""
             SELECT test_name, report_date, ref_range_text, unit
@@ -484,10 +552,14 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
     def get_available_tests() -> Dict[str, Any]:
         """WHEN TO USE: When you need to see what tests are available in the database.
 
-        Lists all unique test names with their panel(s), unit, and report count.
+        Lists every distinct test_name with its unit, panel(s) and report
+        count: the authoritative spelling to use in get_test_trends and SQL
+        filters, so call this before filtering by test_name rather than
+        guessing. A test reported in two units appears once per unit.
 
-        Returns:
-            List of all tests with metadata
+        Result: total_unique_tests and tests, rows with test_name, unit, panels
+        (comma-separated), report_count (distinct report dates), first_seen
+        and last_seen.
         """
         rows = db_manager.execute_safe_query("""
             SELECT test_name, unit,

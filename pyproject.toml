@@ -10,7 +10,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = ["fastmcp>=0.4.0"]
+# A new fastmcp major is adopted deliberately: the stdio wire contract
+# (tool names, schemas, descriptions, results) is re-checked on a major.
+mcp = ["fastmcp>=4.0.0,<5.0.0"]
 dev = ["pytest>=7.0.0", "pytest-cov>=4.0.0", "ruff>=0.1.0"]
 
 [project.scripts]

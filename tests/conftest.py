@@ -69,9 +69,8 @@ def sample_report(sample_result, sample_note):
     )
 
 
-@pytest.fixture
-def multi_result_report():
-    """A report with multiple results across panels."""
+def make_multi_result_report():
+    """A report with multiple results across panels (synthetic values)."""
     results = [
         ParsedResult(
             panel_name="LIPID PANEL, STANDARD",
@@ -169,3 +168,9 @@ def multi_result_report():
         results=results,
         notes=notes,
     )
+
+
+@pytest.fixture
+def multi_result_report():
+    """A report with multiple results across panels."""
+    return make_multi_result_report()

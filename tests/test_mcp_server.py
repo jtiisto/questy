@@ -11,6 +11,7 @@ from questy.localdb.db import QuestyDB
 from questy.mcp.config import MCPConfig
 from questy.mcp.server import DatabaseManager, SQLiteConnection, create_mcp_server
 from questy.parser.models import ParsedNote, ParsedReport, ParsedResult
+from tests.mcp_tools import extract_tools
 
 
 @pytest.fixture
@@ -72,20 +73,9 @@ class TestDatabaseManager:
 
 
 class TestMCPServerTools:
-    """Test the MCP tool functions by calling them directly on the server."""
-
-    @pytest.fixture
-    def tools(self, config):
-        """Get a dict of tool functions from the MCP server."""
-        server = create_mcp_server(config)
-        # FastMCP tools are registered as decorated functions; access them
-        # by creating a DatabaseManager and calling the functions directly.
-        # Instead, we test via DatabaseManager which is what the tools use.
-        return DatabaseManager(config)
+    """Test the queries the MCP tools run, through DatabaseManager."""
 
     def test_explore_database_structure(self, config):
-        server = create_mcp_server(config)
-        # We can't easily call MCP tools directly, so test via DatabaseManager
         db_mgr = DatabaseManager(config)
         tables = db_mgr.execute_safe_query(
             "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -163,6 +153,101 @@ class TestMCPServerTools:
         """)
         assert len(rows) >= 1
         assert all(r["patient_name"] == "DOE, JANE" for r in rows)
+
+
+class TestMCPToolCalls:
+    """Call every registered tool function, reached through the server's
+    public tool listing, against the populated database."""
+
+    @pytest.fixture
+    def tools(self, config):
+        return extract_tools(create_mcp_server(config))
+
+    def test_lists_nine_tools(self, tools):
+        assert len(tools) == 9
+
+    def test_explore_database_structure(self, tools):
+        result = tools["explore_database_structure"]()
+        tables = result["available_tables"]
+        assert set(tables) >= {"reports", "results", "notes"}
+        assert tables["results"]["row_count"] == 5
+        assert tables["results"]["date_range"] == {"earliest": "2025-04-11", "latest": "2025-04-11"}
+        assert "usage_tip" in result
+
+    def test_get_table_details(self, tools):
+        result = tools["get_table_details"]("results")
+        assert result["table_name"] == "results"
+        assert {c["name"] for c in result["columns"]} >= {"test_name", "value", "unit", "flag"}
+        assert len(result["sample_data"]) == 3
+
+    def test_get_table_details_rejects_bad_names(self, tools):
+        with pytest.raises(ValueError, match="Invalid table name"):
+            tools["get_table_details"]("results; DROP TABLE reports")
+        with pytest.raises(ValueError, match="does not exist"):
+            tools["get_table_details"]("nope")
+
+    def test_execute_sql_query(self, tools):
+        rows = tools["execute_sql_query"](
+            "SELECT test_name FROM results WHERE flag = ? ORDER BY test_name", ["H"]
+        )
+        assert [r["test_name"] for r in rows] == ["CHOLESTEROL, TOTAL", "LDL-CHOLESTEROL"]
+        with pytest.raises(ValueError, match="cannot be empty"):
+            tools["execute_sql_query"]("  ")
+
+    def test_get_report_summary(self, tools):
+        result = tools["get_report_summary"]()
+        assert result["total_reports"] == 1
+        assert result["date_range"] == {"first": "2025-04-11", "latest": "2025-04-11"}
+        assert result["latest_report"]["patient_name"] == "DOE, JANE"
+        assert [p["panel_name"] for p in result["latest_panels"]] == [
+            "CBC (INCLUDES DIFF/PLT)", "COMPREHENSIVE METABOLIC PANEL", "LIPID PANEL, STANDARD",
+        ]
+        assert [r["test_name"] for r in result["latest_out_of_range"]] == [
+            "CHOLESTEROL, TOTAL", "LDL-CHOLESTEROL",
+        ]
+        assert result["total_unique_tests"] == 5
+
+    def test_get_test_trends(self, tools):
+        result = tools["get_test_trends"]("ldl-cholesterol")
+        assert result["data_points"] == 1
+        assert result["unit"] == "mg/dL"
+        assert result["trends"][0]["value"] == 152.0
+        assert result["trends"][0]["flag"] == "H"
+
+    def test_get_test_trends_unknown_name_suggests(self, tools):
+        result = tools["get_test_trends"]("CHOLESTEROL")
+        assert result["data_points"] == 0
+        assert result["suggestions"] == ["CHOLESTEROL, TOTAL", "HDL CHOLESTEROL", "LDL-CHOLESTEROL"]
+        with pytest.raises(ValueError, match="required"):
+            tools["get_test_trends"]("")
+
+    def test_get_panel_results(self, tools):
+        result = tools["get_panel_results"]()
+        assert result["report_date"] == "2025-04-11"
+        assert result["panel_count"] == 3
+        one = tools["get_panel_results"](panel_name="lipid panel, standard")
+        assert list(one["panels"]) == ["LIPID PANEL, STANDARD"]
+        assert len(one["panels"]["LIPID PANEL, STANDARD"]) == 3
+        none = tools["get_panel_results"](report_date="2020-01-01")
+        assert none["panel_count"] == 0
+
+    def test_get_out_of_range_results(self, tools):
+        result = tools["get_out_of_range_results"]()
+        assert result["flagged_count"] == 2
+        assert all(r["flag"] == "H" for r in result["results"])
+        assert tools["get_out_of_range_results"]("2020-01-01")["flagged_count"] == 0
+
+    def test_get_reference_range_changes(self, tools):
+        result = tools["get_reference_range_changes"]()
+        assert result == {"tests_with_changes": 0, "changes": []}
+
+    def test_get_available_tests(self, tools):
+        result = tools["get_available_tests"]()
+        assert result["total_unique_tests"] == 5
+        ldl = next(t for t in result["tests"] if t["test_name"] == "LDL-CHOLESTEROL")
+        assert ldl["panels"] == "LIPID PANEL, STANDARD"
+        assert ldl["report_count"] == 1
+        assert ldl["first_seen"] == ldl["last_seen"] == "2025-04-11"
 
 
 class TestMCPServerCreation:
