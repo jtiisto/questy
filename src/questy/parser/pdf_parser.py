@@ -501,15 +501,34 @@ _AGE_RE = re.compile(r"Age[:\s]+(\d+)", re.IGNORECASE)
 _LAB_REF_RE = re.compile(r"Lab Reference ID:\s*([A-Z0-9-]+)", re.IGNORECASE)
 
 
+def _run_pdftotext(args: list[str]) -> str:
+    """Run pdftotext with `args` and return its text output.
+
+    The header cross-check, the missed-test recovery and the value
+    verification all read this text, so a pdftotext that is missing or fails
+    would silently switch all three off and the import would succeed
+    unchecked. It fails the parse instead; questy-import reports the reason
+    for that PDF and goes on to the next.
+    """
+    try:
+        result = subprocess.run(
+            ["pdftotext", *args], capture_output=True, text=True, check=False
+        )
+    except FileNotFoundError as e:
+        raise RuntimeError(
+            "pdftotext is not installed (poppler-utils); the cross-checks need it"
+        ) from e
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"pdftotext failed (exit {result.returncode}): {result.stderr.strip()}"
+        )
+    return result.stdout
+
+
 def _extract_header_from_text(pdf_path: Path) -> dict[str, str | None]:
     """Extract page-1 header fields from raw PDF text via pdftotext."""
-    result = subprocess.run(
-        ["pdftotext", "-f", "1", "-l", "1", "-layout", str(pdf_path), "-"],
-        capture_output=True,
-        text=True,
-        check=False,  # a failed pdftotext yields empty text; the cross-check then finds nothing
-    )
-    return _parse_header_text(result.stdout)
+    text = _run_pdftotext(["-f", "1", "-l", "1", "-layout", str(pdf_path), "-"])
+    return _parse_header_text(text)
 
 
 def _parse_header_text(raw_text: str) -> dict[str, str | None]:
@@ -637,13 +656,7 @@ def _extract_text_values(pdf_path: Path) -> dict[str, str]:
     Keeps the first occurrence of each test name (the actual result,
     not chart labels that may repeat later).
     """
-    result = subprocess.run(
-        ["pdftotext", "-layout", str(pdf_path), "-"],
-        capture_output=True,
-        text=True,
-        check=False,  # as in _extract_header_from_text
-    )
-    return _parse_text_values(result.stdout)
+    return _parse_text_values(_run_pdftotext(["-layout", str(pdf_path), "-"]))
 
 
 def _parse_text_values(raw_text: str) -> dict[str, str]:

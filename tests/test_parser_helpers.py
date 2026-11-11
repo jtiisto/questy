@@ -8,16 +8,20 @@ _validate_header, _post_process_results.
 
 from __future__ import annotations
 
+import subprocess
 from datetime import date, datetime
 from types import SimpleNamespace
 
 import pytest
 
+from questy.parser import pdf_parser
 from questy.parser.models import ParsedResult
 from questy.parser.pdf_parser import (
     _build_note,
     _build_result,
     _deduplicate_results,
+    _extract_header_from_text,
+    _extract_text_values,
     _find_missed_names,
     _parse_date,
     _parse_datetime,
@@ -636,3 +640,53 @@ class TestPostProcessResults:
         results = _post_process_results([r1, r2])
         assert results[0].unit == "fL"
         assert results[1].unit == "Thousand/uL"
+
+
+# --- pdftotext ---
+
+
+class TestRunPdftotext:
+    """A missing or failing pdftotext fails the parse: the header cross-check,
+    the missed-test recovery and the value verification all read its text, so
+    running on without it would import an unchecked report in silence."""
+
+    @staticmethod
+    def _completed(returncode, stdout="", stderr=""):
+        def fake_run(args, **kwargs):
+            fake_run.args = args
+            return subprocess.CompletedProcess(args, returncode, stdout=stdout, stderr=stderr)
+        return fake_run
+
+    def test_text_values_come_from_pdftotext(self, monkeypatch, tmp_path):
+        fake = self._completed(0, stdout="GLUCOSE                 95\nTSH                     1.2\n")
+        monkeypatch.setattr(pdf_parser.subprocess, "run", fake)
+        assert _extract_text_values(tmp_path / "r.pdf") == {"GLUCOSE": "95", "TSH": "1.2"}
+        assert fake.args[0] == "pdftotext"
+        assert fake.args[-1] == "-"
+
+    def test_header_comes_from_page_one(self, monkeypatch, tmp_path):
+        fake = self._completed(0, stdout="DOB: 03/08/1990   Age: 35\nLab Reference ID: AB12-3\n")
+        monkeypatch.setattr(pdf_parser.subprocess, "run", fake)
+        header = _extract_header_from_text(tmp_path / "r.pdf")
+        assert header["dob"] == "03/08/1990"
+        assert header["age"] == "35"
+        assert fake.args[1:5] == ["-f", "1", "-l", "1"]
+
+    @pytest.mark.parametrize("extract", [_extract_header_from_text, _extract_text_values],
+                             ids=["header", "values"])
+    def test_nonzero_exit_fails_with_stderr(self, monkeypatch, tmp_path, extract):
+        monkeypatch.setattr(
+            pdf_parser.subprocess, "run",
+            self._completed(1, stderr="Syntax Error: Couldn't read xref table\n"),
+        )
+        with pytest.raises(RuntimeError, match=r"pdftotext failed \(exit 1\): Syntax Error"):
+            extract(tmp_path / "r.pdf")
+
+    @pytest.mark.parametrize("extract", [_extract_header_from_text, _extract_text_values],
+                             ids=["header", "values"])
+    def test_missing_binary_names_the_package(self, monkeypatch, tmp_path, extract):
+        def missing(args, **kwargs):
+            raise FileNotFoundError(2, "No such file or directory", "pdftotext")
+        monkeypatch.setattr(pdf_parser.subprocess, "run", missing)
+        with pytest.raises(RuntimeError, match="not installed .poppler-utils."):
+            extract(tmp_path / "r.pdf")

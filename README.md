@@ -133,6 +133,8 @@ The vision pass sometimes paraphrases a printed test name (`CHOL/HDL RATIO` for 
 
 Runs `pdftotext` across the full PDF and matches test-name/value patterns via regex. Any test names found in the raw text but missing from the LLM extraction trigger a targeted recovery pass: all pages are re-sent to Claude with a prompt specifically requesting those missed tests.
 
+If `pdftotext` is missing or exits non-zero, the parse of that PDF fails with the reason (`questy-import` prints it as `Failed: <file>: ...` and goes on to the next file). It never runs on without the text: the header cross-check, the recovery pass and the value verification all depend on it, and a report imported without them would look checked when it was not.
+
 Recovery outcomes are tracked:
 
 - All missed tests recovered — Warning with count
