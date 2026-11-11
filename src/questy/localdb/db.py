@@ -7,7 +7,7 @@ from pathlib import Path
 from sqlalchemy import create_engine, delete, inspect, or_, select, text
 from sqlalchemy.orm import Session, sessionmaker
 
-from ..parser.names import names_match
+from ..parser.names import MICRO_SIGNS, names_match
 from .models import Base, Note, Report, Result
 
 # Columns copied from a pre-multi-report database (reports keyed by report_date).
@@ -44,6 +44,7 @@ class QuestyDB:
         self.SessionLocal = sessionmaker(bind=self.engine)
         self._migrate_legacy_schema()
         Base.metadata.create_all(self.engine)
+        self._normalize_stored_units()
 
     def _migrate_legacy_schema(self) -> None:
         """Rebuild a database whose reports are keyed by report_date.
@@ -87,6 +88,23 @@ class QuestyDB:
                 ))
             for table in legacy:
                 conn.execute(text(f"DROP TABLE {table}_legacy"))
+
+    def _normalize_stored_units(self) -> None:
+        """Write the micro sign in stored units and ranges as ASCII u.
+
+        The parser now does this on import (parser.names.normalize_unit); rows
+        imported before it carried the micro sign U+00B5 or Greek mu U+03BC,
+        so one test could sit under three units. Idempotent and cheap: it
+        runs on every open and changes nothing once applied.
+        """
+        micro, mu = MICRO_SIGNS
+        params = {"micro": micro, "mu": mu, "like_micro": f"%{micro}%", "like_mu": f"%{mu}%"}
+        with self.engine.begin() as conn:
+            for column in ("unit", "ref_range_text"):
+                conn.execute(text(
+                    f"UPDATE results SET {column} = replace(replace({column}, :micro, 'u'), :mu, 'u') "
+                    f"WHERE {column} LIKE :like_micro OR {column} LIKE :like_mu"
+                ), params)
 
     def get_session(self) -> Session:
         return self.SessionLocal()

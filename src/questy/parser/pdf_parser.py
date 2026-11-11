@@ -20,7 +20,7 @@ import anthropic
 from pdf2image import convert_from_path
 
 from .models import ParsedNote, ParsedReport, ParsedResult, ParseWarning
-from .names import names_match, normalize_name
+from .names import names_match, normalize_name, normalize_unit
 from .prompt import (
     HEADER_PROMPT,
     HEADER_SCHEMA,
@@ -68,6 +68,10 @@ def _post_process_results(results: list[ParsedResult]) -> list[ParsedResult]:
             r.unit = new_unit
             if old_unit in r.ref_range_text:
                 r.ref_range_text = r.ref_range_text.replace(old_unit, new_unit)
+
+        # One spelling of the micro sign (umol/L), in the unit and the range
+        r.unit = normalize_unit(r.unit)
+        r.ref_range_text = normalize_unit(r.ref_range_text)
     return results
 
 

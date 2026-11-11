@@ -1,8 +1,19 @@
-"""Test-name matching shared by the parser and the database."""
+"""Test-name matching and unit spelling shared by the parser and the database."""
 
 from __future__ import annotations
 
 import re
+
+# The micro sign reaches the database three ways from one printed glyph: ASCII
+# u, the micro sign U+00B5 and Greek mu U+03BC. One glyph, one stored spelling.
+MICRO_SIGNS = ("\u00b5", "\u03bc")
+
+
+def normalize_unit(text: str) -> str:
+    """Write the micro sign as ASCII u, so umol/L has one spelling."""
+    for sign in MICRO_SIGNS:
+        text = text.replace(sign, "u")
+    return text
 
 # The model sometimes paraphrases a printed test name ("CHOL/HDL RATIO" for
 # "CHOL/HDLC RATIO"). Names this short are left to exact matching: one letter

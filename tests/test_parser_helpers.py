@@ -599,6 +599,27 @@ class TestPostProcessResults:
         assert results[0].unit == "fL"
         assert results[0].ref_range_text == "80.0-100.0"
 
+    @pytest.mark.parametrize("sign", ["\u00b5", "\u03bc"], ids=["micro-sign", "greek-mu"])
+    def test_micro_sign_written_as_u(self, sign):
+        """The micro sign is transcribed three ways; the unit and the range
+        text both end up with the ASCII spelling."""
+        r = ParsedResult(
+            "HOMOCYSTEINE", "HOMOCYSTEINE", 7.0, "7.0", None,
+            f"{sign}mol/L", None, False, 4.0, 15.0, f"4.0-15.0 {sign}mol/L",
+        )
+        results = _post_process_results([r])
+        assert results[0].unit == "umol/L"
+        assert results[0].ref_range_text == "4.0-15.0 umol/L"
+
+    def test_ascii_unit_unchanged(self):
+        r = ParsedResult(
+            "HOMOCYSTEINE", "HOMOCYSTEINE", 7.0, "7.0", None,
+            "umol/L", None, False, 4.0, 15.0, "4.0-15.0 umol/L",
+        )
+        results = _post_process_results([r])
+        assert results[0].unit == "umol/L"
+        assert results[0].ref_range_text == "4.0-15.0 umol/L"
+
     def test_empty_list(self):
         assert _post_process_results([]) == []
 

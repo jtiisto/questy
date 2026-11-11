@@ -44,9 +44,10 @@ Read-only: SQL is SELECT/WITH only, one statement, rows capped at max_rows.
 - Several reports can share a report_date (separate tests drawn the same
   day), so MAX(report_date) picks a date, not one report; the same test in
   two same-day reports has two rows. Dates are YYYY-MM-DD.
-- Units are as the lab printed them, no conversion; unit is a column on
-  every row. An inequality result ("<0.5") has value NULL, value_prefix "<"
-  or ">" and the number in value_text; use value_text when value is NULL.
+- Units are as the lab printed them, no conversion, except that the micro
+  sign is written u (umol/L); unit is a column on every row. An inequality
+  result ("<0.5") has value NULL, value_prefix "<" or ">" and the number in
+  value_text; use value_text when value is NULL.
 - flag is "H" (above range), "L" (below) or NULL (in range or no range).
   ref_range_text is the range as printed; ref_range_low/high are its parsed
   bounds. Compare a value against the range on its own report_date, since
@@ -653,7 +654,7 @@ def _get_data_guide() -> str:
 - `content` (TEXT): The note text
 
 ## Data Conventions
-- **Units are original lab units** — no conversion applied
+- **Units are original lab units** — no conversion applied; the micro sign is written `u` (`umol/L`)
 - **Flags**: "H" = above reference range, "L" = below reference range
 - **Inequality values**: `value` is NULL, `value_prefix` is "<" or ">", numeric part in `value_text`
 - **Calculated values**: `is_calculated` = True for tests marked "(calc)" like LDL-Cholesterol

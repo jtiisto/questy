@@ -45,7 +45,8 @@ group heading, NOT the individual test name.
 (e.g., "229", "<0.5", "152 H")
 - "value_prefix": "<" or ">" if the value has an inequality prefix, otherwise null
 - "unit": Unit of measurement (e.g., "mg/dL", "ng/mL", "%"), empty string if none. \
-Never include the "(calc)" marker in the unit; record it in is_calculated.
+Never include the "(calc)" marker in the unit; record it in is_calculated. \
+Write the micro sign as the letter u ("umol/L", never "µmol/L").
 - "flag": "H" if flagged high, "L" if flagged low, null if normal/in-range
 - "is_calculated": true if marked "(calc)", false otherwise
 - "ref_range_low": Lower bound of reference range as number, or null

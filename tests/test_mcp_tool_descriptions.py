@@ -81,6 +81,7 @@ RULES_IN_INSTRUCTIONS = [
     "SQL equality is case-sensitive; get_test_trends is not",
     "share a report_date",
     "as the lab printed them",
+    "micro sign is written u (umol/L)",
     "value_prefix",
     "file://questy_data_guide/",
 ]

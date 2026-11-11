@@ -6,6 +6,7 @@ import sqlite3
 from datetime import date, datetime
 
 import pytest
+from sqlalchemy import text
 
 from questy.localdb.db import QuestyDB
 from questy.localdb.models import Note, Report, Result
@@ -122,6 +123,39 @@ class TestLegacyMigration:
             assert report.pdf_sha256 == "ab" * 32
             names = {r.test_name for r in session.query(Result).filter_by(report_id=report.id)}
             assert names == {"CHOLESTEROL, TOTAL"}
+
+
+class TestStoredUnitNormalization:
+    def test_micro_sign_rows_rewritten_on_open(self, tmp_path, multi_result_report):
+        """Rows imported before the parser normalized units carry the micro
+        sign or Greek mu; opening the database rewrites them to u, once."""
+        db_path = tmp_path / "units.db"
+        db = QuestyDB(db_path)
+        db.import_report(multi_result_report)
+        with db.engine.begin() as conn:
+            conn.execute(text(
+                "UPDATE results SET unit = '\u00b5mol/L', ref_range_text = '4.0-15.0 \u00b5mol/L' "
+                "WHERE test_name = 'GLUCOSE'"
+            ))
+            conn.execute(text(
+                "UPDATE results SET unit = '\u03bcmol/L', ref_range_text = '4.0-15.0 \u03bcmol/L' "
+                "WHERE test_name = 'WHITE BLOOD CELL COUNT'"
+            ))
+
+        reopened = QuestyDB(db_path)
+        with reopened.get_session() as session:
+            rows = {r.test_name: r for r in session.query(Result).all()}
+        assert rows["GLUCOSE"].unit == "umol/L"
+        assert rows["GLUCOSE"].ref_range_text == "4.0-15.0 umol/L"
+        assert rows["WHITE BLOOD CELL COUNT"].unit == "umol/L"
+        assert rows["WHITE BLOOD CELL COUNT"].ref_range_text == "4.0-15.0 umol/L"
+        assert rows["CHOLESTEROL, TOTAL"].unit == "mg/dL"
+        assert rows["CHOLESTEROL, TOTAL"].ref_range_text == "<200"
+
+        # Opening again changes nothing
+        QuestyDB(db_path)
+        with reopened.get_session() as session:
+            assert session.query(Result).filter(Result.unit == "umol/L").count() == 2
 
 
 class TestImportReport:

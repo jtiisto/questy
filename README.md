@@ -146,7 +146,7 @@ Every extracted numeric value is compared against the pdftotext output for the m
 
 After all extraction passes, deterministic corrections are applied to fix known issues that neither the LLM nor pdftotext can reliably handle:
 
-- **Unit glyph corrections** — Some PDF fonts render characters differently than their Unicode mapping. For example, "fL" (femtoliters) is commonly misread as "IL" by both vision and text extraction due to font glyph mapping. A corrections map (`_UNIT_CORRECTIONS`) fixes these, updating both the `unit` field and `ref_range_text`.
+- **Unit glyph corrections** — Some PDF fonts render characters differently than their Unicode mapping. For example, "fL" (femtoliters) is commonly misread as "IL" by both vision and text extraction due to font glyph mapping. A corrections map (`_UNIT_CORRECTIONS`) fixes these, updating both the `unit` field and `ref_range_text`. The micro sign, which the vision pass transcribes as `u`, the micro sign U+00B5 or Greek mu U+03BC, is always stored as `u` (`umol/L`) in both fields; rows imported before this rule are rewritten the next time `questy-import` opens the database.
 - **`(calc)` marker** — Quest prints `(calc)` beside the unit or reference range of calculated tests. It is removed from `unit` (`mg/dL (calc)` → `mg/dL`, `(calc)` → empty) and sets `is_calculated`; `ref_range_text` keeps it as printed.
 
 ### Database import
@@ -207,7 +207,7 @@ One row per test measurement. Primary key: `id`; `report_id` references `reports
 - `ref_range_low` / `ref_range_high` (REAL) — Parsed bounds
 - `ref_range_text` (TEXT) — Raw reference range: `"<200"`, `"30-100"`, `"> OR = 40"`
 
-Values are stored in original lab units (no conversion).
+Values are stored in original lab units (no conversion), with the micro sign written `u` (`umol/L`).
 
 ### notes
 
