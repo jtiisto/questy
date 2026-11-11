@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import tempfile
 from datetime import date, datetime
-from pathlib import Path
 
 import pytest
 
 from questy.localdb.db import QuestyDB
-from questy.parser.models import ParsedNote, ParsedReport, ParsedResult, ParseWarning
+from questy.parser.models import ParsedNote, ParsedReport, ParsedResult
 
 
 @pytest.fixture

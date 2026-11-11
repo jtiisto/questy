@@ -10,11 +10,10 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from types import SimpleNamespace
-from unittest.mock import MagicMock
 
 import pytest
 
-from questy.parser.models import ParsedResult, ParseWarning
+from questy.parser.models import ParsedResult
 from questy.parser.pdf_parser import (
     _build_note,
     _build_result,
@@ -27,7 +26,6 @@ from questy.parser.pdf_parser import (
     _validate_header,
     _verify_values,
 )
-
 
 # --- _build_result ---
 
@@ -539,14 +537,14 @@ class TestValidateHeader:
     def test_text_fills_missing_dob(self):
         header = {"dob": None, "age": None, "collected_at": "2025-11-14T07:50"}
         text_header = {"dob": "03/08/1990", "age": "35"}
-        warnings = _validate_header(header, text_header)
+        _validate_header(header, text_header)
         assert header["dob"] == "1990-03-08"
         assert header["age"] == 35
 
     def test_text_fills_missing_age(self):
         header = {"dob": "1990-03-08", "age": None, "collected_at": "2025-11-14T07:50"}
         text_header = {"dob": None, "age": "35"}
-        warnings = _validate_header(header, text_header)
+        _validate_header(header, text_header)
         assert header["age"] == 35
 
     def test_age_tolerance_allows_off_by_one(self):

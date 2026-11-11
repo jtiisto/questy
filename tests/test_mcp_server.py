@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
-from pathlib import Path
-
 import pytest
 
 from questy.localdb.db import QuestyDB
 from questy.mcp.config import MCPConfig
 from questy.mcp.server import DatabaseManager, SQLiteConnection, create_mcp_server
-from questy.parser.models import ParsedNote, ParsedReport, ParsedResult
 from tests.mcp_tools import extract_tools
 
 

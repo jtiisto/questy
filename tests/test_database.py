@@ -8,19 +8,19 @@ from datetime import date, datetime
 import pytest
 
 from questy.localdb.db import QuestyDB
-from questy.localdb.models import Base, Note, Report, Result
-from questy.parser.models import ParsedNote, ParsedReport, ParsedResult
+from questy.localdb.models import Note, Report, Result
+from questy.parser.models import ParsedReport, ParsedResult
 
 
 class TestQuestyDBInit:
     def test_creates_db_file(self, tmp_path):
         db_path = tmp_path / "test.db"
-        db = QuestyDB(db_path)
+        QuestyDB(db_path)
         assert db_path.exists()
 
     def test_creates_parent_dirs(self, tmp_path):
         db_path = tmp_path / "subdir" / "deep" / "test.db"
-        db = QuestyDB(db_path)
+        QuestyDB(db_path)
         assert db_path.parent.exists()
 
     def test_tables_created(self, tmp_db):

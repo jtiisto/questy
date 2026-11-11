@@ -337,7 +337,9 @@ def _parse_json_response(response, schema: dict) -> dict:
         raise ValueError(f"Failed to parse Claude response as JSON: {e}\n{text[:500]}")
 
     if not isinstance(data, dict):
-        raise ValueError(f"Expected JSON object, got {type(data).__name__}")
+        # ValueError, not TypeError: the shape of the model's reply is bad input
+        # data, and every unusable reply raises ValueError here.
+        raise ValueError(f"Expected JSON object, got {type(data).__name__}")  # noqa: TRY004
 
     # Verify required keys are present
     for key in schema.get("required", []):
@@ -501,6 +503,7 @@ def _extract_header_from_text(pdf_path: Path) -> dict[str, str | None]:
         ["pdftotext", "-f", "1", "-l", "1", "-layout", str(pdf_path), "-"],
         capture_output=True,
         text=True,
+        check=False,  # a failed pdftotext yields empty text; the cross-check then finds nothing
     )
     return _parse_header_text(result.stdout)
 
@@ -634,6 +637,7 @@ def _extract_text_values(pdf_path: Path) -> dict[str, str]:
         ["pdftotext", "-layout", str(pdf_path), "-"],
         capture_output=True,
         text=True,
+        check=False,  # as in _extract_header_from_text
     )
     return _parse_text_values(result.stdout)
 
@@ -704,7 +708,6 @@ def _verify_values(
 
         # Compare with tolerance for floating point
         if abs(r.value - text_num) > 0.01:
-            old_value = r.value
             old_text = r.value_text
 
             # Auto-correct: trust the text-extracted value

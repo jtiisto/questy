@@ -88,7 +88,7 @@ def main() -> int:
             for c in outcome.conflicts:
                 print(f"  WARNING: Same-day reports disagree on {c}. Both values are stored.")
             success += 1
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - one bad PDF must not stop the batch; the failure is printed and counted
             print(f"Failed: {pdf_path.name}: {e}")
             failed += 1
 

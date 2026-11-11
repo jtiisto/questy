@@ -8,7 +8,7 @@ import logging
 import re
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 try:
     from fastmcp import FastMCP
@@ -76,10 +76,10 @@ class QueryValidator:
     """SQL query validation and sanitization for read-only access."""
 
     ALLOWED_STATEMENTS = ("select", "with")
-    FORBIDDEN_KEYWORDS = {
+    FORBIDDEN_KEYWORDS = frozenset({
         "insert", "update", "delete", "drop", "create", "alter",
         "pragma", "attach", "detach", "vacuum", "analyze",
-    }
+    })
 
     @classmethod
     def validate_query(cls, query: str) -> None:
@@ -137,7 +137,7 @@ class DatabaseManager:
     def get_connection(self):
         return SQLiteConnection(self.config.db_path)
 
-    def execute_safe_query(self, query: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+    def execute_safe_query(self, query: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
         if self.config.strict_validation:
             self.validator.validate_query(query)
 
@@ -152,7 +152,7 @@ class DatabaseManager:
                 cursor.execute(query, params or [])
                 return [dict(row) for row in cursor.fetchall()]
         except sqlite3.Error as e:
-            raise ValueError(f"Database error: {str(e)}")
+            raise ValueError(f"Database error: {e!s}")
 
 
 def create_mcp_server(config: MCPConfig) -> FastMCP:
@@ -162,7 +162,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
     mcp = FastMCP("Quest Diagnostics Lab Data Explorer", instructions=INSTRUCTIONS)
 
     @mcp.tool()
-    def explore_database_structure() -> Dict[str, Any]:
+    def explore_database_structure() -> dict[str, Any]:
         """WHEN TO USE: When you need to understand what lab data is available.
 
         Starting point for exploring Quest Diagnostics data: the tables, their
@@ -204,7 +204,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
         }
 
     @mcp.tool()
-    def get_table_details(table_name: str) -> Dict[str, Any]:
+    def get_table_details(table_name: str) -> dict[str, Any]:
         """WHEN TO USE: When you need to see the structure and sample data of a specific table.
 
         Use after explore_database_structure, and before writing SQL, to see a
@@ -252,7 +252,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
         }
 
     @mcp.tool()
-    def execute_sql_query(query: str, params: Optional[List[Any]] = None) -> List[Dict[str, Any]]:
+    def execute_sql_query(query: str, params: list[Any] | None = None) -> list[dict[str, Any]]:
         """WHEN TO USE: When you need to run custom SQL queries against the lab data.
 
         Only SELECT and WITH queries are allowed; one statement, no PRAGMA. Rows
@@ -285,7 +285,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
         return db_manager.execute_safe_query(query, params)
 
     @mcp.tool()
-    def get_report_summary() -> Dict[str, Any]:
+    def get_report_summary() -> dict[str, Any]:
         """WHEN TO USE: When you want a quick overview of all lab reports.
 
         Total report count, date range, and the latest report_date's panels and
@@ -349,7 +349,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
         }
 
     @mcp.tool()
-    def get_test_trends(test_name: str) -> Dict[str, Any]:
+    def get_test_trends(test_name: str) -> dict[str, Any]:
         """WHEN TO USE: When you need to see how a specific test has changed over time.
 
         Time series of one test across all reports: values, reference ranges
@@ -397,7 +397,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
             }
 
         return {
-            "test_name": rows[0]["test_name"] if "test_name" in rows[0] else test_name,
+            "test_name": rows[0].get("test_name", test_name),
             "unit": rows[0]["unit"],
             "data_points": len(rows),
             "trends": rows,
@@ -405,9 +405,9 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
 
     @mcp.tool()
     def get_panel_results(
-        panel_name: Optional[str] = None,
-        report_date: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        panel_name: str | None = None,
+        report_date: str | None = None,
+    ) -> dict[str, Any]:
         """WHEN TO USE: When you need lab results grouped by panel.
 
         Modes:
@@ -465,7 +465,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
         }
 
     @mcp.tool()
-    def get_out_of_range_results(report_date: Optional[str] = None) -> Dict[str, Any]:
+    def get_out_of_range_results(report_date: str | None = None) -> dict[str, Any]:
         """WHEN TO USE: When you need to see which results are flagged as abnormal.
 
         All results flagged H (above the reference range) or L (below it) on
@@ -501,7 +501,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
         }
 
     @mcp.tool()
-    def get_reference_range_changes() -> Dict[str, Any]:
+    def get_reference_range_changes() -> dict[str, Any]:
         """WHEN TO USE: When you need to check if reference ranges have changed between reports.
 
         Compares ref_range_text for the same test_name across all reports and
@@ -549,7 +549,7 @@ def create_mcp_server(config: MCPConfig) -> FastMCP:
         }
 
     @mcp.tool()
-    def get_available_tests() -> Dict[str, Any]:
+    def get_available_tests() -> dict[str, Any]:
         """WHEN TO USE: When you need to see what tests are available in the database.
 
         Lists every distinct test_name with its unit, panel(s) and report
