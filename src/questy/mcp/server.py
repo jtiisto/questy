@@ -12,11 +12,11 @@ from typing import Any
 
 try:
     from fastmcp import FastMCP
-except ImportError:
+except ImportError as e:
     raise ImportError(
         "FastMCP is required for MCP server functionality. "
         "Install with: pip install questy[mcp] or pip install fastmcp"
-    )
+    ) from e
 
 from .config import MCPConfig
 
@@ -154,7 +154,7 @@ class DatabaseManager:
                 cursor.execute(query, params or [])
                 return [dict(row) for row in cursor.fetchall()]
         except sqlite3.Error as e:
-            raise ValueError(f"Database error: {e!s}")
+            raise ValueError(f"Database error: {e!s}") from e
 
 
 def create_mcp_server(config: MCPConfig) -> FastMCP:

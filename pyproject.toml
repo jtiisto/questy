@@ -26,6 +26,17 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/questy"]
 
+[tool.ruff]
+target-version = "py310"
+
+[tool.ruff.lint]
+# The rule families this repo passes, pinned so the gate does not move with
+# ruff's defaults. Line length is not checked (E501 is not selected).
+select = [
+    "E4", "E7", "E9", "F", "I", "UP", "B", "SIM", "RUF", "PLW", "PLE", "BLE",
+    "PIE", "RET", "C4", "PTH", "N", "ASYNC", "FURB", "LOG",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = [

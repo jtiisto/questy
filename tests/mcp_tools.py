@@ -34,7 +34,7 @@ def server_instructions(mcp_server):
         return pool.submit(asyncio.run, handshake()).result()
 
 
-def server_resources(mcp_server):
+def resource_uris(mcp_server):
     """Return the URIs of the resources `mcp_server` lists, as strings.
 
     Listed the way a client lists them, through an in-memory `fastmcp.Client`

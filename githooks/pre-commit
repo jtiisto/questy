@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Pre-commit hook: lint the staged Python, then run the tests relevant to it.
+#
+#   * staged *.py                      -> ruff check on those files
+#   * staged src/questy/mcp/**         -> the MCP test files
+#   * staged tests/test_*.py           -> those files
+#   * staged parser/localdb code,      -> the whole suite (about two seconds today)
+#     conftest.py, mcp_tools.py or
+#     pyproject.toml
+#   * nothing Python staged            -> nothing to run (docs-only commit)
+#
+# Tracked in githooks/ and activated once per clone with
+#   git config core.hooksPath githooks
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+PY="${QUESTY_PYTHON:-.venv/bin/python}"
+[[ -x "$PY" ]] || PY=python3
+
+staged="$(git diff --cached --name-only --diff-filter=ACMR)"
+py_staged="$(printf '%s\n' "$staged" | grep -E '\.py$' || true)"
+if [[ -z "$py_staged" ]] && ! printf '%s\n' "$staged" | grep -qx 'pyproject.toml'; then
+    echo "pre-commit: no Python staged, nothing to run"
+    exit 0
+fi
+
+if [[ -n "$py_staged" ]]; then
+    echo "pre-commit: ruff on staged Python..."
+    # shellcheck disable=SC2086
+    "$PY" -m ruff check $py_staged || { echo "pre-commit: RUFF FAILED, commit aborted." >&2; exit 1; }
+fi
+
+if printf '%s\n' "$staged" | grep -qE '^src/questy/(parser|localdb)/|^tests/conftest\.py$|^tests/mcp_tools\.py$|^pyproject\.toml$'; then
+    tests="tests"
+else
+    tests="$(printf '%s\n' "$staged" | grep -E '^tests/test_.*\.py$' || true)"
+    if printf '%s\n' "$staged" | grep -qE '^src/questy/mcp/'; then
+        tests="$tests tests/test_mcp_server.py tests/test_mcp_tool_descriptions.py tests/test_mcp_config.py tests/test_mcp_query_validator.py"
+    fi
+    tests="$(printf '%s\n' $tests | sort -u | tr '\n' ' ')"
+fi
+
+if [[ -z "${tests// /}" ]]; then
+    echo "pre-commit: no tests selected by the staged paths"
+    exit 0
+fi
+
+echo "pre-commit: pytest $tests"
+# shellcheck disable=SC2086
+"$PY" -m pytest -q $tests || { echo "pre-commit: TESTS FAILED, commit aborted." >&2; exit 1; }

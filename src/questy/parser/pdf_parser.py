@@ -332,18 +332,18 @@ def _parse_json_response(response, schema: dict) -> dict:
     if text.startswith("```"):
         lines = text.split("\n")
         # Remove first line (```json or ```) and last line (```)
-        lines = [l for l in lines[1:] if l.strip() != "```"]
+        lines = [line for line in lines[1:] if line.strip() != "```"]
         text = "\n".join(lines)
 
     try:
         data = json.loads(text)
     except json.JSONDecodeError as e:
-        raise ValueError(f"Failed to parse Claude response as JSON: {e}\n{text[:500]}")
+        raise ValueError(f"Failed to parse Claude response as JSON: {e}\n{text[:500]}") from e
 
     if not isinstance(data, dict):
         # ValueError, not TypeError: the shape of the model's reply is bad input
         # data, and every unusable reply raises ValueError here.
-        raise ValueError(f"Expected JSON object, got {type(data).__name__}")  # noqa: TRY004
+        raise ValueError(f"Expected JSON object, got {type(data).__name__}")
 
     # Verify required keys are present
     for key in schema.get("required", []):
@@ -662,8 +662,8 @@ def _extract_text_values(pdf_path: Path) -> dict[str, str]:
 def _parse_text_values(raw_text: str) -> dict[str, str]:
     """Parse test name → raw value string from pdftotext -layout output."""
     values: dict[str, str] = {}
-    for line in raw_text.split("\n"):
-        line = line.strip()
+    for raw_line in raw_text.split("\n"):
+        line = raw_line.strip()
         m = _TEXT_RESULT_RE.match(line)
         if m:
             name = m.group(1).strip()

@@ -688,5 +688,5 @@ class TestRunPdftotext:
         def missing(args, **kwargs):
             raise FileNotFoundError(2, "No such file or directory", "pdftotext")
         monkeypatch.setattr(pdf_parser.subprocess, "run", missing)
-        with pytest.raises(RuntimeError, match="not installed .poppler-utils."):
+        with pytest.raises(RuntimeError, match=r"not installed \(poppler-utils\)"):
             extract(tmp_path / "r.pdf")

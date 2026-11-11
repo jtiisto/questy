@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Pre-push hook: the full gate. ruff over the repo, then the whole suite with
+# the coverage threshold. The threshold is a project fact (80 %; 84 % when it
+# was set on 2026-11-11); this line is the authority on whether the gate passes.
+#
+# Tracked in githooks/ and activated once per clone with
+#   git config core.hooksPath githooks
+set -uo pipefail
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+PY="${QUESTY_PYTHON:-.venv/bin/python}"
+[[ -x "$PY" ]] || PY=python3
+
+echo "pre-push: ruff check ."
+"$PY" -m ruff check . || { echo "pre-push: RUFF FAILED, push aborted." >&2; exit 1; }
+
+echo "pre-push: full suite with coverage"
+"$PY" -m pytest -q --cov=questy --cov-report=term --cov-fail-under=80 \
+    || { echo "pre-push: GATE FAILED, push aborted." >&2; exit 1; }
+
+echo "pre-push: gate passed"

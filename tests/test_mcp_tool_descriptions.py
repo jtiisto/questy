@@ -55,7 +55,7 @@ from questy.localdb.db import QuestyDB
 from questy.mcp.config import MCPConfig
 from questy.mcp.server import create_mcp_server
 from tests.conftest import make_multi_result_report
-from tests.mcp_tools import list_tools, server_instructions, server_resources
+from tests.mcp_tools import list_tools, resource_uris, server_instructions
 
 EXPECTED_TOOLS = [
     "explore_database_structure", "get_table_details", "execute_sql_query",
@@ -119,9 +119,9 @@ def instructions(server):
 
 
 @pytest.fixture(scope="module")
-def resource_uris(server):
+def listed_resource_uris(server):
     """The resource URIs as a client lists them."""
-    return server_resources(server)
+    return resource_uris(server)
 
 
 def _split_docstring(doc):
@@ -287,13 +287,13 @@ class TestServerInstructions:
         assert marker in _normalise(instructions or ""), (
             f"the instructions lost {marker!r}")
 
-    def test_every_resource_pointer_is_listed_verbatim(self, instructions, resource_uris):
+    def test_every_resource_pointer_is_listed_verbatim(self, instructions, listed_resource_uris):
         """Each file:// URI the instructions name is one the client can open:
         it appears in the resource listing exactly as written."""
         named = [uri.rstrip(".,") for uri in _FILE_URI.findall(instructions or "")]
         assert named, "the instructions point at no file:// resource"
         for uri in named:
-            assert uri in resource_uris, (
+            assert uri in listed_resource_uris, (
                 f"the instructions point at {uri!r}, but the server lists "
-                f"{resource_uris}: FastMCP lists a file:// URI with a trailing "
+                f"{listed_resource_uris}: FastMCP lists a file:// URI with a trailing "
                 "slash, and the client rejects the slash-less form")

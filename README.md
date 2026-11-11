@@ -218,9 +218,12 @@ Clinical notes, comments, risk categories, and methodology notes. Linked to repo
 ## Testing
 
 ```bash
-pip install -e '.[dev]'
+pip install -e '.[mcp,dev]'
 pytest
+ruff check .
 ```
+
+The tracked hooks in `githooks/` are the gate; activate them once per clone with `git config core.hooksPath githooks`. pre-commit runs ruff on the staged Python and the tests the staged paths select; pre-push runs `ruff check .` and the full suite with coverage, failing under 80%. ruff's rule families are pinned in `pyproject.toml` so the gate does not move with ruff's defaults.
 
 277 tests covering parser models, helper functions (build/validate/deduplicate/cross-check/post-process), database operations (additive import, re-import, same-day conflicts, schema migration), MCP config validation, query security (SQL injection prevention, read-only enforcement), MCP server integration (every tool called against a synthetic database), the tool-description contract above, and CLI argument parsing.
 
@@ -241,6 +244,9 @@ src/questy/
     server.py        # FastMCP 4.x server with 9 tools + data guide resource
     config.py        # MCPConfig with validation
     cli.py           # questy-mcp command
+githooks/
+  pre-commit                  # ruff on staged Python + the tests the staged paths select
+  pre-push                    # ruff check . + full suite, coverage gate 80%
 tests/
   conftest.py                 # Shared fixtures
   test_parser_models.py       # Dataclass tests
